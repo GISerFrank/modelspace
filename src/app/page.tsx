@@ -685,7 +685,7 @@ export default function Page() {
   const [pan, setPan] = useState({ x: 0, y: 0 }); // 平移偏移
   const [isPanning, setIsPanning] = useState(false); // 是否正在平移
   const [panStart, setPanStart] = useState({ x: 0, y: 0 }); // 平移起点
-  // const [spacePressed, setSpacePressed] = useState(false); // 空格键是否按下
+  const [spacePressed, setSpacePressed] = useState(false); // 空格键是否按下
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -784,10 +784,11 @@ export default function Page() {
   //   }
   // };
 
-  // 平移开始（点击空白处时）
+  // 3. 空格按下时开始平移
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    // 如果点击的是画布空白处（不是节点），就开始平移
-    if (e.target === e.currentTarget || (e.target as HTMLElement).closest('#canvas-content')) {
+    if (spacePressed) {
+      e.preventDefault();
+      e.stopPropagation();
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
     }
@@ -838,28 +839,28 @@ export default function Page() {
   };
 
   // 在 Page 组件的 useEffect 中添加键盘控制
-  // useEffect(() => {
-  //   const handleKeyDown = (e: KeyboardEvent) => {
-  //     if (e.code === "Space" && !e.repeat) {
-  //       e.preventDefault();
-  //       setSpacePressed(true);
-  //     }
-  //   };
-  //   const handleKeyUp = (e: KeyboardEvent) => {
-  //     if (e.code === "Space") {
-  //       setSpacePressed(false);
-  //       setIsPanning(false);
-  //     }
-  //   };
-  //
-  //   window.addEventListener("keydown", handleKeyDown);
-  //   window.addEventListener("keyup", handleKeyUp);
-  //
-  //   return () => {
-  //     window.removeEventListener("keydown", handleKeyDown);
-  //     window.removeEventListener("keyup", handleKeyUp);
-  //   };
-  // }, []);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat) {
+        e.preventDefault();
+        setSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        setSpacePressed(false);
+        setIsPanning(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
 
 // 初次加载：优先云端，其次本地缓存
   useEffect(() => {
@@ -1290,7 +1291,7 @@ export default function Page() {
                 <Layers className="w-5 h-5"/>
                 <div className="font-semibold">拼装画布</div>
                 <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc
-                  取消当前源
+                  取消当前源；按空格+鼠标左键拖拽画布
                 </div>
               </div>
               <div className="flex items-center gap-2">
