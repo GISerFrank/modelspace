@@ -246,7 +246,7 @@ function PaletteItem({ item }: { item: any }) {
       className={`cursor-grab ${item.color} border rounded-xl p-3 shadow-sm hover:shadow-md transition`}
     >
       <div className="text-xs text-slate-500">{item.kind}</div>
-      <div className="font-semibold leading-tight">{item.type}</div>
+      <div className="font-semibold text-xs leading-tight break-words">{item.type}</div>
     </div>
   );
 }
