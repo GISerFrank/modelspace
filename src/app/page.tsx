@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -681,40 +681,51 @@ export default function Page() {
       })  );
 
   // Page 组件内部：
-  const ensureProjectId = () => {
-    let id = new URLSearchParams(location.search).get("p");
+  const ensureProjectId = useCallback(() => {
+    const url = new URL(location.href);
+    let id = url.searchParams.get("p");
     if (!id) {
       id = Math.random().toString(36).slice(2, 8);
-      const url = new URL(location.href);
       url.searchParams.set("p", id);
       history.replaceState(null, "", url.toString());
     }
     return id;
-  };
-
-  useEffect(() => {
-    // 初次加载
-    const id = ensureProjectId();
-    (async () => {
-      const res = await fetch(`/api/state/load?projectId=${id}`);
-      const { data } = await res.json();
-      if (data) {
-        setNodes(data.nodes || []);
-        setEdges(data.edges || []);
-        setModelMeta(data.meta || { name: "My Design", notes: "" });
-      }
-    })();
   }, []);
 
+// 初次加载：优先云端，其次本地缓存
   useEffect(() => {
-    // 变更后 600ms 自动保存
+    const id = ensureProjectId();
+    (async () => {
+      try {
+        const r = await fetch(`/api/state/load?projectId=${id}`);
+        const { data } = await r.json();
+        if (data) {
+          setNodes(data.nodes || []);
+          setEdges(data.edges || []);
+          setModelMeta(data.meta || { name: "My Design", notes: "" });
+          return;
+        }
+      } catch {}
+      try {
+        const saved = localStorage.getItem("puzzle:state:" + id);
+        if (saved) {
+          const s = JSON.parse(saved);
+          setNodes(s.nodes || []);
+          setEdges(s.edges || []);
+          setModelMeta(s.meta || { name: "My Design", notes: "" });
+        }
+      } catch {}
+    })();
+  }, [ensureProjectId]);
+
+// 变更后自动保存（600ms 防抖）：写云端，同时写本地兜底
+  useEffect(() => {
     const id = new URLSearchParams(location.search).get("p");
     if (!id) return;
+    const payload = { projectId: id, data: { nodes, edges, meta: modelMeta } };
     const t = setTimeout(() => {
-      fetch("/api/state/save", {
-        method: "POST",
-        body: JSON.stringify({ projectId: id, data: { nodes, edges, meta: modelMeta } }),
-      });
+      fetch("/api/state/save", { method: "POST", body: JSON.stringify(payload) }).catch(() => {});
+      try { localStorage.setItem("puzzle:state:" + id, JSON.stringify(payload.data)); } catch {}
     }, 600);
     return () => clearTimeout(t);
   }, [nodes, edges, modelMeta]);
