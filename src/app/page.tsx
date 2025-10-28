@@ -1291,7 +1291,7 @@ export default function Page() {
                 <Layers className="w-5 h-5"/>
                 <div className="font-semibold">拼装画布</div>
                 <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc
-                  取消当前源；按空格+鼠标左键拖拽画布
+                  取消当前源；按空格+鼠标左键拖拽画布；鼠标滚轮缩放
                 </div>
               </div>
               <div className="flex items-center gap-2">
