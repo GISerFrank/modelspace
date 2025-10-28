@@ -230,8 +230,8 @@ function n(type: string, props: Record<string, any> = {}) {
 //   return { x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) };
 // }
 function clampToCanvas(x: number, y: number) {
-  const canvasW = 3000;
-  const canvasH = 2000;
+  const canvasW = 1500;
+  const canvasH = 1000;
   const maxX = Math.max(0, canvasW - NODE_W);
   const maxY = Math.max(0, canvasH - NODE_H);
   return { x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) };
@@ -1341,7 +1341,7 @@ export default function Page() {
             <div
                 id="canvas-root"
                 className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
-                    linkMode ? "cursor-crosshair" : isPanning ? "cursor-grab" : ""
+                    linkMode ? "cursor-crosshair" : isPanning ? "cursor-grabbing" : "cursor-grab"
                 }`}
                 onWheel={handleWheel}
                 onMouseDown={handleCanvasMouseDown}
@@ -1362,8 +1362,8 @@ export default function Page() {
                   style={{
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                     transformOrigin: "0 0",
-                    width: "3000px",
-                    height: "2000px",
+                    width: "1500px",
+                    height: "1000px",
                     position: "relative",
                     pointerEvents: isPanning ? "none" : "auto", // 平移时禁用内容的鼠标事件
                   }}
