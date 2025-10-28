@@ -222,11 +222,18 @@ function n(type: string, props: Record<string, any> = {}) {
   const def = MODULE_TYPES.find((m) => m.type === type)?.d || {};
   return { id: uid(), type, props: { ...def, ...props }, x: 0, y: 0 };
 }
+// function clampToCanvas(x: number, y: number) {
+//   const rect = document.getElementById("canvas-root")?.getBoundingClientRect();
+//   if (!rect) return { x, y };
+//   const maxX = Math.max(0, rect.width - NODE_W);
+//   const maxY = Math.max(0, rect.height - NODE_H);
+//   return { x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) };
+// }
 function clampToCanvas(x: number, y: number) {
-  const rect = document.getElementById("canvas-root")?.getBoundingClientRect();
-  if (!rect) return { x, y };
-  const maxX = Math.max(0, rect.width - NODE_W);
-  const maxY = Math.max(0, rect.height - NODE_H);
+  const canvasW = 3000;
+  const canvasH = 2000;
+  const maxX = Math.max(0, canvasW - NODE_W);
+  const maxY = Math.max(0, canvasH - NODE_H);
   return { x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) };
 }
 
@@ -678,7 +685,7 @@ export default function Page() {
   const [pan, setPan] = useState({ x: 0, y: 0 }); // 平移偏移
   const [isPanning, setIsPanning] = useState(false); // 是否正在平移
   const [panStart, setPanStart] = useState({ x: 0, y: 0 }); // 平移起点
-  const [spacePressed, setSpacePressed] = useState(false); // 空格键是否按下
+  // const [spacePressed, setSpacePressed] = useState(false); // 空格键是否按下
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -755,21 +762,27 @@ export default function Page() {
     });
   };
 
+  // const handleWheel = (e: React.WheelEvent) => {
+  //   if (e.ctrlKey || e.metaKey) {
+  //     e.preventDefault();
+  //     const delta = e.deltaY > 0 ? -0.1 : 0.1;
+  //     handleZoom(delta, e.clientX, e.clientY);
+  //   }
+  // };
+  // 滚轮缩放（不需要 Ctrl）
   const handleWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      handleZoom(delta, e.clientX, e.clientY);
-    }
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    handleZoom(delta, e.clientX, e.clientY);
   };
 
-  const handlePanStart = (e: React.MouseEvent) => {
-    if (spacePressed || e.button === 1) {
-      e.preventDefault();
-      setIsPanning(true);
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-    }
-  };
+  // const handlePanStart = (e: React.MouseEvent) => {
+  //   if (spacePressed || e.button === 1) {
+  //     e.preventDefault();
+  //     setIsPanning(true);
+  //     setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  //   }
+  // };
 
   const handlePanMove = (e: React.MouseEvent) => {
     if (isPanning) {
@@ -815,29 +828,29 @@ export default function Page() {
     setPan({ x: 0, y: 0 });
   };
 
-  // 在 Page 组件的 useEffect 中添加
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !e.repeat) {
-        e.preventDefault();
-        setSpacePressed(true);
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        setSpacePressed(false);
-        setIsPanning(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, []);
+  // 在 Page 组件的 useEffect 中添加键盘控制
+  // useEffect(() => {
+  //   const handleKeyDown = (e: KeyboardEvent) => {
+  //     if (e.code === "Space" && !e.repeat) {
+  //       e.preventDefault();
+  //       setSpacePressed(true);
+  //     }
+  //   };
+  //   const handleKeyUp = (e: KeyboardEvent) => {
+  //     if (e.code === "Space") {
+  //       setSpacePressed(false);
+  //       setIsPanning(false);
+  //     }
+  //   };
+  //
+  //   window.addEventListener("keydown", handleKeyDown);
+  //   window.addEventListener("keyup", handleKeyUp);
+  //
+  //   return () => {
+  //     window.removeEventListener("keydown", handleKeyDown);
+  //     window.removeEventListener("keyup", handleKeyUp);
+  //   };
+  // }, []);
 
 // 初次加载：优先云端，其次本地缓存
   useEffect(() => {
@@ -1335,7 +1348,7 @@ export default function Page() {
                   handlePanEnd();
                   setPointer(null);
                 }}
-                onClick={() => setSel(null)}
+                // onClick={() => setSel(null)}
             >
               {/* 可缩放平移的内容容器 */}
               <div
@@ -1345,6 +1358,13 @@ export default function Page() {
                     width: "3000px",
                     height: "2000px",
                     position: "relative",
+                    pointerEvents: isPanning ? "none" : "auto", // 平移时禁用内容的鼠标事件
+                  }}
+                  onClick={(e) => {
+                    // 只有点击空白处才取消选择
+                    if (e.target === e.currentTarget) {
+                      setSel(null);
+                    }
                   }}
               >
               <GridBackground/>
