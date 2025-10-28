@@ -36,6 +36,10 @@ import {
   Sparkles,
   StickyNote,
   Copy,
+  Plus,        // 新增
+  Minus,       // 新增
+  Maximize2,   // 新增
+  RotateCcw,   // 新增
 } from "lucide-react";
 
 /**
@@ -669,6 +673,12 @@ export default function Page() {
   const [hover, setHover] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState("model");
   const [modelMeta, setModelMeta] = useState<{ name: string; notes: string }>({ name: "My Design", notes: "" });
+  // 在 Page() 函数内部添加这些状态
+  const [zoom, setZoom] = useState(1); // 缩放比例：0.5 - 2.0
+  const [pan, setPan] = useState({ x: 0, y: 0 }); // 平移偏移
+  const [isPanning, setIsPanning] = useState(false); // 是否正在平移
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 }); // 平移起点
+  const [spacePressed, setSpacePressed] = useState(false); // 空格键是否按下
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -701,6 +711,132 @@ export default function Page() {
     // 记住这次使用的 projectId
     localStorage.setItem("lastProjectId", id);
     return id;
+  }, []);
+
+  // Page 中准备 convId，并传给 ChatPanel
+  const ensureConversationId = () => {
+    const url = new URL(location.href);
+    let id = url.searchParams.get("c");
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 10);
+      url.searchParams.set("c", id);
+      history.replaceState(null, "", url.toString());
+    }
+    return id;
+  };
+  const convId = useMemo(() => (typeof window !== "undefined" ? ensureConversationId() : ""), []);
+
+  const screenToCanvas = (screenX: number, screenY: number) => {
+    const canvas = document.getElementById("canvas-root");
+    if (!canvas) return { x: screenX, y: screenY };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left - pan.x) / zoom,
+      y: (screenY - rect.top - pan.y) / zoom,
+    };
+  };
+
+  const handleZoom = (delta: number, centerX?: number, centerY?: number) => {
+    setZoom((prevZoom) => {
+      const newZoom = Math.min(Math.max(prevZoom + delta, 0.5), 2);
+      if (centerX !== undefined && centerY !== undefined) {
+        const canvas = document.getElementById("canvas-root");
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const x = centerX - rect.left;
+          const y = centerY - rect.top;
+          setPan((prevPan) => ({
+            x: prevPan.x - (x * (newZoom - prevZoom)) / prevZoom,
+            y: prevPan.y - (y * (newZoom - prevZoom)) / prevZoom,
+          }));
+        }
+      }
+      return newZoom;
+    });
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      handleZoom(delta, e.clientX, e.clientY);
+    }
+  };
+
+  const handlePanStart = (e: React.MouseEvent) => {
+    if (spacePressed || e.button === 1) {
+      e.preventDefault();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  };
+
+  const handlePanMove = (e: React.MouseEvent) => {
+    if (isPanning) {
+      setPan({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      });
+    }
+  };
+
+  const handlePanEnd = () => {
+    setIsPanning(false);
+  };
+
+  const handleFitToScreen = () => {
+    const canvas = document.getElementById("canvas-root");
+    if (!canvas || nodes.length === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const bounds = nodes.reduce(
+        (acc, n) => ({
+          minX: Math.min(acc.minX, n.x),
+          minY: Math.min(acc.minY, n.y),
+          maxX: Math.max(acc.maxX, n.x + NODE_W),
+          maxY: Math.max(acc.maxY, n.y + NODE_H),
+        }),
+        { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+    );
+    const contentW = bounds.maxX - bounds.minX;
+    const contentH = bounds.maxY - bounds.minY;
+    const scaleX = (rect.width * 0.9) / contentW;
+    const scaleY = (rect.height * 0.9) / contentH;
+    const newZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.5), 2);
+    const newPan = {
+      x: (rect.width - contentW * newZoom) / 2 - bounds.minX * newZoom,
+      y: (rect.height - contentH * newZoom) / 2 - bounds.minY * newZoom,
+    };
+    setZoom(newZoom);
+    setPan(newPan);
+  };
+
+  const handleResetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  // 在 Page 组件的 useEffect 中添加
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat) {
+        e.preventDefault();
+        setSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        setSpacePressed(false);
+        setIsPanning(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, []);
 
 // 初次加载：优先云端，其次本地缓存
@@ -740,20 +876,6 @@ export default function Page() {
     }, 600);
     return () => clearTimeout(t);
   }, [nodes, edges, modelMeta]);
-
-// Page 中准备 convId，并传给 ChatPanel
-  const ensureConversationId = () => {
-    const url = new URL(location.href);
-    let id = url.searchParams.get("c");
-    if (!id) {
-      id = Math.random().toString(36).slice(2, 10);
-      url.searchParams.set("c", id);
-      history.replaceState(null, "", url.toString());
-    }
-    return id;
-  };
-  const convId = useMemo(() => (typeof window !== "undefined" ? ensureConversationId() : ""), []);
-
 
   useEffect(() => {
     loadTemplate(tpl);
@@ -889,10 +1011,13 @@ export default function Page() {
         setDragFromPalette(false);
         return;
       }
-      const box = document.getElementById("canvas-root")!.getBoundingClientRect();
-      const lx = p.x - box.left - NODE_W / 2;
-      const ly = p.y - box.top - NODE_H / 2;
-      let { x, y } = clampToCanvas(lx, ly);
+      // const box = document.getElementById("canvas-root")!.getBoundingClientRect();
+      // const lx = p.x - box.left - NODE_W / 2;
+      // const ly = p.y - box.top - NODE_H / 2;
+      // let { x, y } = clampToCanvas(lx, ly);
+      // 修改这里：使用 screenToCanvas 转换坐标
+      const canvasPos = screenToCanvas(p.x, p.y);
+      let { x, y } = clampToCanvas(canvasPos.x - NODE_W / 2, canvasPos.y - NODE_H / 2);
       if (snap) {
         x = Math.round(x / GRID) * GRID;
         y = Math.round(y / GRID) * GRID;
@@ -1140,27 +1265,29 @@ export default function Page() {
           <div className="relative">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <Layers className="w-5 h-5" />
+                <Layers className="w-5 h-5"/>
                 <div className="font-semibold">拼装画布</div>
-                <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc 取消当前源</div>
+                <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc
+                  取消当前源
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-2 text-sm">
                   <span>对齐</span>
-                  <Switch checked={snap} onCheckedChange={setSnap} />
+                  <Switch checked={snap} onCheckedChange={setSnap}/>
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      variant={linkMode ? "default" : "outline"}
-                      size="sm"
-                      className="gap-2"
-                      onClick={() => {
-                        setLinkMode((v) => !v);
-                        setFromId(null);
-                      }}
+                        variant={linkMode ? "default" : "outline"}
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => {
+                          setLinkMode((v) => !v);
+                          setFromId(null);
+                        }}
                     >
-                      <Link2 className="w-4 h-4" />
+                      <Link2 className="w-4 h-4"/>
                       连线
                     </Button>
                   </TooltipTrigger>
@@ -1169,7 +1296,7 @@ export default function Page() {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button variant="outline" size="sm" className="gap-2" onClick={exportJSON}>
-                      <Download className="w-4 h-4" />
+                      <Download className="w-4 h-4"/>
                       导出
                     </Button>
                   </TooltipTrigger>
@@ -1177,10 +1304,11 @@ export default function Page() {
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label className="inline-flex items-center gap-2 cursor-pointer border rounded-md px-3 py-1.5 bg-white text-sm">
-                      <Upload className="w-4 h-4" />
+                    <label
+                        className="inline-flex items-center gap-2 cursor-pointer border rounded-md px-3 py-1.5 bg-white text-sm">
+                      <Upload className="w-4 h-4"/>
                       导入
-                      <Input type="file" accept="application/json" className="hidden" onChange={importJSON} />
+                      <Input type="file" accept="application/json" className="hidden" onChange={importJSON}/>
                     </label>
                   </TooltipTrigger>
                   <TooltipContent>导入先前导出的 JSON，恢复画布</TooltipContent>
@@ -1189,86 +1317,177 @@ export default function Page() {
             </div>
 
             <div
-              id="canvas-root"
-              className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-auto ${
-                linkMode ? "cursor-crosshair" : ""
-              }`}
-              onMouseMove={(e) => {
-                const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                setPointer({ x: e.clientX - r.left, y: e.clientY - r.top });
-              }}
-              onMouseLeave={() => setPointer(null)}
-              onClick={() => setSel(null)}
+                id="canvas-root"
+                className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
+                    linkMode ? "cursor-crosshair" : spacePressed || isPanning ? "cursor-grab" : ""
+                }`}
+                onWheel={handleWheel}
+                onMouseDown={(e) => {
+                  handlePanStart(e);
+                }}
+                onMouseMove={(e) => {
+                  handlePanMove(e);
+                  const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                  setPointer({x: (e.clientX - r.left - pan.x) / zoom, y: (e.clientY - r.top - pan.y) / zoom});
+                }}
+                onMouseUp={handlePanEnd}
+                onMouseLeave={() => {
+                  handlePanEnd();
+                  setPointer(null);
+                }}
+                onClick={() => setSel(null)}
             >
-              <GridBackground />
+              {/* 可缩放平移的内容容器 */}
+              <div
+                  style={{
+                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                    transformOrigin: "0 0",
+                    width: "3000px",
+                    height: "2000px",
+                    position: "relative",
+                  }}
+              >
+              <GridBackground/>
 
               {/* guides */}
-              {guides.x !== null && <div className="absolute top-0 bottom-0 w-px bg-blue-400/60" style={{ left: guides.x }} />}
-              {guides.y !== null && <div className="absolute left-0 right-0 h-px bg-blue-400/60" style={{ top: guides.y }} />}
+              {guides.x !== null &&
+                  <div className="absolute top-0 bottom-0 w-px bg-blue-400/60" style={{left: guides.x}}/>}
+              {guides.y !== null &&
+                  <div className="absolute left-0 right-0 h-px bg-blue-400/60" style={{top: guides.y}}/>}
 
               {/* edges */}
               <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
                 {edges.map(([f, t], i) => {
                   const a = nodes[f],
-                    b = nodes[t];
+                      b = nodes[t];
                   if (!a || !b) return null;
                   const x1 = a.x + NODE_W / 2,
-                    y1 = a.y + HDR_H,
-                    x2 = b.x + NODE_W / 2,
-                    y2 = b.y + HDR_H,
-                    mx = (x1 + x2) / 2;
-                  return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#94a3b8" strokeWidth="2" fill="none" markerEnd="url(#arrow)" />;
+                      y1 = a.y + HDR_H,
+                      x2 = b.x + NODE_W / 2,
+                      y2 = b.y + HDR_H,
+                      mx = (x1 + x2) / 2;
+                  return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#94a3b8"
+                               strokeWidth="2" fill="none" markerEnd="url(#arrow)"/>;
                 })}
                 {linkMode &&
-                  fromId &&
-                  pointer &&
-                  (() => {
-                    const a = nodes.find((n) => n.id === fromId);
-                    if (!a) return null;
-                    const x1 = a.x + NODE_W / 2,
-                      y1 = a.y + HDR_H,
-                      x2 = pointer.x,
-                      y2 = pointer.y,
-                      mx = (x1 + x2) / 2;
-                    return <path d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#60a5fa" strokeWidth="2" fill="none" strokeDasharray="6 6" />;
-                  })()}
+                    fromId &&
+                    pointer &&
+                    (() => {
+                      const a = nodes.find((n) => n.id === fromId);
+                      if (!a) return null;
+                      const x1 = a.x + NODE_W / 2,
+                          y1 = a.y + HDR_H,
+                          x2 = pointer.x,
+                          y2 = pointer.y,
+                          mx = (x1 + x2) / 2;
+                      return <path d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#60a5fa"
+                                   strokeWidth="2" fill="none" strokeDasharray="6 6"/>;
+                    })()}
                 <defs>
-                  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+                  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6"
+                          orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
                   </marker>
                 </defs>
               </svg>
 
               {/* nodes */}
               {nodes.map((n) => (
-                <CanvasNode
-                  key={n.id}
-                  node={n}
-                  color={MODULE_TYPES.find((m) => m.type === n.type)?.color}
-                  selected={sel === n.id}
-                  onSelect={() => setSel(n.id)}
-                  onRemove={() => removeNode(n.id)}
-                  onInfo={() => {}}
-                  linkMode={linkMode}
-                  isSource={fromId === n.id}
-                  isHot={hover === n.id}
-                  onHoverIn={() => setHover(n.id)}
-                  onHoverOut={() => setHover((prev) => (prev === n.id ? null : prev))}
-                  onClick={() => {
-                    if (linkMode) {
-                      if (!fromId) {
-                        setFromId(n.id);
-                      } else if (fromId !== n.id) {
-                        addEdge(fromId, n.id);
-                      } else {
-                        setFromId(null);
-                      }
-                    } else {
-                      setSel(n.id);
-                    }
-                  }}
-                />
+                  <CanvasNode
+                      key={n.id}
+                      node={n}
+                      color={MODULE_TYPES.find((m) => m.type === n.type)?.color}
+                      selected={sel === n.id}
+                      onSelect={() => setSel(n.id)}
+                      onRemove={() => removeNode(n.id)}
+                      onInfo={() => {
+                      }}
+                      linkMode={linkMode}
+                      isSource={fromId === n.id}
+                      isHot={hover === n.id}
+                      onHoverIn={() => setHover(n.id)}
+                      onHoverOut={() => setHover((prev) => (prev === n.id ? null : prev))}
+                      onClick={() => {
+                        if (linkMode) {
+                          if (!fromId) {
+                            setFromId(n.id);
+                          } else if (fromId !== n.id) {
+                            addEdge(fromId, n.id);
+                          } else {
+                            setFromId(null);
+                          }
+                        } else {
+                          setSel(n.id);
+                        }
+                      }}
+                  />
               ))}
+            </div>
+
+              {/* 缩放控制面板 - 添加在 canvas-root 内部，缩放容器外部 */}
+              <div className="absolute bottom-4 right-4 flex flex-col gap-2 bg-white rounded-lg shadow-md p-2 border z-10">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleZoom(0.1)}
+                        disabled={zoom >= 2}
+                        className="h-8 w-8"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>放大</TooltipContent>
+                </Tooltip>
+
+                <div className="text-xs text-center font-mono text-slate-600 py-1 select-none">
+                  {Math.round(zoom * 100)}%
+                </div>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleZoom(-0.1)}
+                        disabled={zoom <= 0.5}
+                        className="h-8 w-8"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>缩小</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={handleFitToScreen}
+                        className="h-8 w-8"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>适应画布</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={handleResetView}
+                        className="h-8 w-8"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>重置视图</TooltipContent>
+                </Tooltip>
+              </div>
             </div>
           </div>
 
