@@ -784,6 +784,15 @@ export default function Page() {
   //   }
   // };
 
+  // 平移开始（点击空白处时）
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    // 如果点击的是画布空白处（不是节点），就开始平移
+    if (e.target === e.currentTarget || (e.target as HTMLElement).closest('#canvas-content')) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  };
+
   const handlePanMove = (e: React.MouseEvent) => {
     if (isPanning) {
       setPan({
@@ -1332,12 +1341,10 @@ export default function Page() {
             <div
                 id="canvas-root"
                 className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
-                    linkMode ? "cursor-crosshair" : spacePressed || isPanning ? "cursor-grab" : ""
+                    linkMode ? "cursor-crosshair" : isPanning ? "cursor-grab" : ""
                 }`}
                 onWheel={handleWheel}
-                onMouseDown={(e) => {
-                  handlePanStart(e);
-                }}
+                onMouseDown={handleCanvasMouseDown}
                 onMouseMove={(e) => {
                   handlePanMove(e);
                   const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
