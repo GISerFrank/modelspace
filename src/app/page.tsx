@@ -445,7 +445,7 @@ function ChatPanel({ conversationId,
 }) {
   type Msg = { role: "user" | "assistant" | "search"; content: string };
   const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: '👋 我可以在站内帮你查找模块/模型，并把结果整理进备注。试着问："LoRA 是什么？" 或 "搜索 TransformerDecoder 的论文"。' },
+    { role: "assistant", content: '👋 我可以帮你查找模块/模型，并把结果整理进备注。试着问："LoRA 是什么？" 或 "搜索 TransformerDecoder 的论文"。' },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
