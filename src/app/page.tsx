@@ -1190,7 +1190,7 @@ export default function Page() {
 
             <div
               id="canvas-root"
-              className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
+              className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-auto ${
                 linkMode ? "cursor-crosshair" : ""
               }`}
               onMouseMove={(e) => {
