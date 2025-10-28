@@ -576,7 +576,7 @@ function ChatPanel({ conversationId,
       <CardContent className="p-3">
         <div className="flex items-center gap-2 mb-2">
           <MessageSquare className="w-4 h-4" />
-          <div className="font-medium">AI Chat（站内检索版）</div>
+          <div className="font-medium">AI Chat</div>
           <span className="text-[11px] text-slate-500 inline-flex items-center gap-1">
             <Sparkles className="w-3 h-3" />
             Beta
