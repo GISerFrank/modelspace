@@ -2,7 +2,11 @@ export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 import { Redis } from "@upstash/redis";
-const redis = Redis.fromEnv();
+// const redis = Redis.fromEnv();
+const redis = new Redis({
+    url: process.env.KV_REST_API_URL!,
+    token: process.env.KV_REST_API_TOKEN!,
+});
 
 type State = {
     nodes: any[];
