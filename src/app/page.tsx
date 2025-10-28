@@ -425,7 +425,7 @@ function explain(nodes: any[], edges: any[]) {
 }
 
 // ===== Simple local AI Chat (search-based) =====
-function ChatPanel({
+function ChatPanel({ conversationId,
                      canInsertModule,
                      onInsertModel,
                      onInsertModule,
@@ -434,6 +434,7 @@ function ChatPanel({
                      nodes,         // 新增
                      edges,         // 新增
                    }: {
+  conversationId?: string;
   canInsertModule: boolean;
   onInsertModel: (t: string) => void;
   onInsertModule: (t: string) => void;
@@ -448,6 +449,34 @@ function ChatPanel({
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // 1) 加载历史
+  useEffect(() => {
+    if (!conversationId) return;
+    (async () => {
+      const r = await fetch(`/api/chat/history?conversationId=${conversationId}`);
+      const { messages: hist } = await r.json();
+      if (Array.isArray(hist) && hist.length) setMessages(hist);
+    })();
+  }, [conversationId]);
+
+  // 2) 在你完成一次AI回复后写回（无论你是本地检索或流式AI）
+  async function persistPair(userText: string, assistantText: string) {
+    if (!conversationId) return;
+    await fetch("/api/chat/append", {
+      method: "POST",
+      body: JSON.stringify({
+        conversationId,
+        messages: [
+          { role: "user", content: userText },
+          { role: "assistant", content: assistantText },
+        ],
+      }),
+    });
+  }
+
+  // 4) 如果是“流式 AI”版本，在流结束时：
+  // await persistPair(userText, finalAssistantText);
 
   function summarizeModule(m: any) {
     const kv = Object.entries(m.d || {})
@@ -644,8 +673,65 @@ export default function Page() {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(TouchSensor, { pressDelay: 120 })
-  );
+      useSensor(TouchSensor, {
+        activationConstraint: {
+          delay: 120,   // 长按触发时间（毫秒）
+          tolerance: 5, // 长按期间允许的手指位移像素
+        },
+      })  );
+
+  // Page 组件内部：
+  const ensureProjectId = () => {
+    let id = new URLSearchParams(location.search).get("p");
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 8);
+      const url = new URL(location.href);
+      url.searchParams.set("p", id);
+      history.replaceState(null, "", url.toString());
+    }
+    return id;
+  };
+
+  useEffect(() => {
+    // 初次加载
+    const id = ensureProjectId();
+    (async () => {
+      const res = await fetch(`/api/state/load?projectId=${id}`);
+      const { data } = await res.json();
+      if (data) {
+        setNodes(data.nodes || []);
+        setEdges(data.edges || []);
+        setModelMeta(data.meta || { name: "My Design", notes: "" });
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    // 变更后 600ms 自动保存
+    const id = new URLSearchParams(location.search).get("p");
+    if (!id) return;
+    const t = setTimeout(() => {
+      fetch("/api/state/save", {
+        method: "POST",
+        body: JSON.stringify({ projectId: id, data: { nodes, edges, meta: modelMeta } }),
+      });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [nodes, edges, modelMeta]);
+
+// Page 中准备 convId，并传给 ChatPanel
+  const ensureConversationId = () => {
+    const url = new URL(location.href);
+    let id = url.searchParams.get("c");
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 10);
+      url.searchParams.set("c", id);
+      history.replaceState(null, "", url.toString());
+    }
+    return id;
+  };
+  const convId = useMemo(() => (typeof window !== "undefined" ? ensureConversationId() : ""), []);
+
 
   useEffect(() => {
     loadTemplate(tpl);
@@ -1310,6 +1396,7 @@ export default function Page() {
                     modelMeta={modelMeta}
                     nodes={nodes}
                     edges={edges}
+                    conversationId={convId}
                 />
               </div>
             </Tabs>
