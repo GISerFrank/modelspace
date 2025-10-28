@@ -684,11 +684,22 @@ export default function Page() {
   const ensureProjectId = useCallback(() => {
     const url = new URL(location.href);
     let id = url.searchParams.get("p");
+
     if (!id) {
-      id = Math.random().toString(36).slice(2, 8);
+      // 先尝试从 localStorage 读取上次的 projectId
+      const lastProjectId = localStorage.getItem("lastProjectId");
+      if (lastProjectId) {
+        id = lastProjectId;
+      } else {
+        // 如果也没有，才生成新的
+        id = Math.random().toString(36).slice(2, 8);
+      }
       url.searchParams.set("p", id);
       history.replaceState(null, "", url.toString());
     }
+
+    // 记住这次使用的 projectId
+    localStorage.setItem("lastProjectId", id);
     return id;
   }, []);
 
