@@ -1,11 +1,26 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Github, FileText, Upload, Loader2, Edit3, Check } from "lucide-react";
+import {
+  Sparkles,
+  Github,
+  FileText,
+  Upload,
+  Loader2,
+  Edit3,
+  Check,
+} from "lucide-react";
+import { upload } from '@vercel/blob/client';
 
 interface ParsedModule {
   type: string;
@@ -32,7 +47,11 @@ interface SmartImportDialogProps {
 type ImportMode = "github" | "pdf";
 type Stage = "input" | "uploading" | "processing" | "preview" | "complete";
 
-export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportDialogProps) {
+export function SmartImportDialog({
+                                    open,
+                                    onOpenChange,
+                                    onImport,
+                                  }: SmartImportDialogProps) {
   const [mode, setMode] = useState<ImportMode>("github");
   const [stage, setStage] = useState<Stage>("input");
 
@@ -66,7 +85,9 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
 
     const pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`/api/smart-import/status?jobId=${jobId}`);
+        const response = await fetch(
+            `/api/smart-import/pdf/status?jobId=${jobId}`
+        );
 
         if (!response.ok) {
           throw new Error("Failed to get status");
@@ -80,7 +101,7 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
         if (data.status === "completed" && data.result) {
           clearInterval(pollInterval);
           setParsedResult(data.result);
-          setEditedResult(JSON.parse(JSON.stringify(data.result))); // Deep clone
+          setEditedResult(JSON.parse(JSON.stringify(data.result)));
           setStage("preview");
         } else if (data.status === "error") {
           clearInterval(pollInterval);
@@ -90,7 +111,7 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
       } catch (error) {
         console.error("Polling error:", error);
       }
-    }, 2000); // 每 2 秒轮询一次
+    }, 2000);
 
     return () => clearInterval(pollInterval);
   }, [jobId, stage]);
@@ -98,80 +119,118 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
   const handleParse = async () => {
     try {
       if (mode === "github") {
-        // GitHub 模式 - 使用原有的 parse API
+        // GitHub 模式
         if (!githubUrl.trim()) {
-          throw new Error("请输入GitHub URL");
+          throw new Error("请输入 GitHub URL");
         }
 
         setStage("processing");
         setProgress(10);
         setStatusMessage("正在获取代码...");
 
-        const response = await fetch("/api/smart-import/parse", {
+        const response = await fetch("/api/smart-import/github", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: "github",
-            url: githubUrl,
-          }),
+          body: JSON.stringify({ url: githubUrl }),
         });
 
         if (!response.ok) {
           const error = await response.json();
-          throw new Error(error.message || "解析失败");
+          throw new Error(error.error || "解析失败");
         }
 
         setProgress(60);
         setStatusMessage("AI 分析中...");
 
-        const result: ParsedResult = await response.json();
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.error || "解析失败");
+        }
 
         setProgress(100);
         setStatusMessage("解析完成！");
 
-        setParsedResult(result);
-        setEditedResult(JSON.parse(JSON.stringify(result)));
+        setParsedResult(data.structure);
+        setEditedResult(JSON.parse(JSON.stringify(data.structure)));
 
         setTimeout(() => setStage("preview"), 500);
       } else {
-        // PDF 模式 - 使用 Vercel Blob 方案
+        // PDF 模式
         if (!pdfFile) {
-          throw new Error("请上传PDF文件");
+          throw new Error("请上传 PDF 文件");
         }
 
-        setStage("uploading");
-        setProgress(5);
-        setStatusMessage("上传文件中...");
+        const fileSizeMB = pdfFile.size / 1024 / 1024;
+        const SIZE_THRESHOLD = 4; // 4MB
 
-        const formData = new FormData();
-        formData.append("file", pdfFile);
+        if (fileSizeMB < SIZE_THRESHOLD) {
+          // 小文件 - 直接处理
+          setStage("processing");
+          setProgress(10);
+          setStatusMessage("上传并处理中...");
 
-        // 上传到 Blob
-        const uploadResponse = await fetch("/api/smart-import/pdf/upload", {
-          method: "POST",
-          body: formData,
-        });
+          const formData = new FormData();
+          formData.append("file", pdfFile);
 
-        if (!uploadResponse.ok) {
-          const error = await uploadResponse.json();
-          throw new Error(error.message || "上传失败");
+          const response = await fetch("/api/smart-import/pdf/direct", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "处理失败");
+          }
+
+          setProgress(60);
+          setStatusMessage("AI 分析中...");
+
+          const data = await response.json();
+
+          if (!data.success) {
+            throw new Error(data.error || "处理失败");
+          }
+
+          setProgress(100);
+          setStatusMessage("处理完成！");
+
+          setParsedResult(data.structure);
+          setEditedResult(JSON.parse(JSON.stringify(data.structure)));
+
+          setTimeout(() => setStage("preview"), 500);
+        } else {
+          // 大文件 - 客户端直传到 Blob
+          setStage("uploading");
+          setProgress(5);
+          setStatusMessage("上传文件中...");
+
+          // 使用客户端直传（绕过 API 路由大小限制）
+          const blob = await upload(pdfFile.name, pdfFile, {
+            access: 'public',
+            handleUploadUrl: '/api/smart-import/pdf/upload',
+            clientPayload: JSON.stringify({
+              filename: pdfFile.name,
+            }),
+          });
+
+          console.log('[Upload] Blob uploaded:', blob.url);
+
+          // 生成 jobId
+          const jobId = blob.pathname.split('/').pop()?.split('.')[0] || Date.now().toString();
+
+          // 切换到处理阶段
+          setJobId(jobId);
+          setStage("processing");
+          setProgress(10);
+          setStatusMessage("文件已上传，开始处理...");
         }
-
-        const uploadData = await uploadResponse.json();
-
-        if (!uploadData.success || !uploadData.jobId) {
-          throw new Error("上传失败");
-        }
-
-        // 切换到处理阶段
-        setJobId(uploadData.jobId);
-        setStage("processing");
-        setProgress(10);
-        setStatusMessage("文件已上传,开始处理...");
       }
     } catch (error) {
       console.error("Parse error:", error);
-      setStatusMessage(error instanceof Error ? error.message : "解析失败，请重试");
+      setStatusMessage(
+          error instanceof Error ? error.message : "解析失败，请重试"
+      );
       setTimeout(() => setStage("input"), 2000);
     }
   };
@@ -263,7 +322,9 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
                           <label htmlFor="pdf-upload" className="cursor-pointer">
                             <Upload className="w-8 h-8 mx-auto mb-2 text-slate-400" />
                             <p className="text-sm font-medium">
-                              {pdfFile ? pdfFile.name : "点击上传 PDF"}
+                              {pdfFile
+                                  ? `${pdfFile.name} (${(pdfFile.size / 1024 / 1024).toFixed(2)}MB)`
+                                  : "点击上传 PDF"}
                             </p>
                             <p className="text-xs text-slate-500 mt-1">
                               支持最大 500MB 的 PDF 文件
@@ -272,6 +333,8 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
                         </div>
                         <p className="text-xs text-slate-500">
                           AI 将使用 OCR 提取文本、表格、公式等内容，并分析模型架构。
+                          <br />
+                          小文件 (&lt;4MB) 快速处理，大文件异步处理。
                         </p>
                       </div>
                     </div>
@@ -321,7 +384,9 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
                             <p className="font-medium">{editedResult.meta.name}</p>
                         )}
                         {editedResult.meta.notes && (
-                            <p className="text-sm text-slate-600">{editedResult.meta.notes}</p>
+                            <p className="text-sm text-slate-600">
+                              {editedResult.meta.notes}
+                            </p>
                         )}
                         {editedResult.meta.source && (
                             <p className="text-xs text-slate-500">
@@ -335,7 +400,9 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
                 <div className="space-y-3 max-h-[400px] overflow-y-auto">
                   <div className="flex items-center gap-2 mb-2">
                     <Edit3 className="w-4 h-4" />
-                    <span className="text-sm font-medium">模块列表（可编辑）</span>
+                    <span className="text-sm font-medium">
+                  模块列表（可编辑）
+                </span>
                   </div>
 
                   {editedResult.nodes.map((node, idx) => (
@@ -353,12 +420,14 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
                         </div>
 
                         <div className="text-xs space-y-1">
-                          {Object.entries(node.props).slice(0, 3).map(([key, value]) => (
-                              <div key={key} className="flex gap-2">
-                                <span className="text-slate-500">{key}:</span>
-                                <span className="font-mono">{String(value)}</span>
-                              </div>
-                          ))}
+                          {Object.entries(node.props)
+                              .slice(0, 3)
+                              .map(([key, value]) => (
+                                  <div key={key} className="flex gap-2">
+                                    <span className="text-slate-500">{key}:</span>
+                                    <span className="font-mono">{String(value)}</span>
+                                  </div>
+                              ))}
                         </div>
 
                         <div className="pt-2">
