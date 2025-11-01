@@ -147,7 +147,7 @@ export function SmartImportDialog({ open, onOpenChange, onImport }: SmartImportD
         formData.append("file", pdfFile);
 
         // 上传到 Blob
-        const uploadResponse = await fetch("/api/smart-import/upload", {
+        const uploadResponse = await fetch("/api/smart-import/pdf/upload", {
           method: "POST",
           body: formData,
         });
