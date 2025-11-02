@@ -23,6 +23,7 @@ interface OCRResult {
     metadata?: {
         pages: number;
         language?: string;
+        images?: string[];
     };
 }
 
@@ -59,35 +60,53 @@ async function callOCRService(pdfBuffer: ArrayBuffer): Promise<OCRResult> {
 }
 
 async function callBaiduOCR(pdfBuffer: ArrayBuffer): Promise<OCRResult> {
-    const AI_STUDIO_API_KEY = process.env.AI_STUDIO_API_KEY!;
-    const AI_STUDIO_BASE_URL =
-        process.env.AI_STUDIO_BASE_URL || "https://aistudio.baidu.com/llm/lmapi/v3";
+    const AI_STUDIO_API_KEY = process.env.AI_STUDIO_API_KEY;
+    const AI_STUDIO_API_URL = process.env.AI_STUDIO_API_URL;
+
+    if (!AI_STUDIO_API_KEY || !AI_STUDIO_API_URL) {
+        throw new Error("Missing AI_STUDIO_API_KEY or AI_STUDIO_API_URL");
+    }
 
     try {
         console.log("[Baidu OCR] Processing...");
 
-        const formData = new FormData();
-        formData.append("file", new Blob([pdfBuffer], { type: "application/pdf" }));
+        // 转换为 Base64
+        const buffer = Buffer.from(pdfBuffer);
+        const base64Data = buffer.toString('base64');
 
-        const response = await fetch(`${AI_STUDIO_BASE_URL}/ocr/paddleocr-vl`, {
+        // 使用正确的 API 格式
+        const response = await fetch(AI_STUDIO_API_URL, {
             method: "POST",
             headers: {
-                Authorization: `Bearer ${AI_STUDIO_API_KEY}`,
+                Authorization: `token ${AI_STUDIO_API_KEY}`,
+                "Content-Type": "application/json",
             },
-            body: formData,
+            body: JSON.stringify({
+                file: base64Data,
+                fileType: 0, // 0 for PDF, 1 for images
+            }),
         });
 
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error("[Baidu OCR] Error response:", errorText);
             throw new Error(`Baidu OCR failed: ${response.status}`);
         }
 
         const result = await response.json();
+
+        // 提取 OCR 结果
+        const ocrResults = result.result?.ocrResults || [];
+        const text = ocrResults
+            .map((r: any) => r.prunedResult || r.ocrResult || "")
+            .join("\n\n");
+
         return {
-            text: result.text || result.content || "",
-            tables: result.tables || [],
-            formulas: result.formulas || [],
-            charts: result.charts || [],
-            metadata: { pages: result.pages || 1 },
+            text,
+            metadata: {
+                pages: ocrResults.length,
+                images: ocrResults.map((r: any) => r.ocrImage).filter(Boolean),
+            },
         };
     } catch (error: any) {
         console.error("[Baidu OCR] Error:", error.message);
@@ -228,15 +247,20 @@ async function analyzeWithGPT(ocrResult: OCRResult, filename: string) {
 async function updateJobStatus(job: Partial<ProcessingJob> & { jobId: string }) {
     const existing = await redis.get<ProcessingJob>(`job:${job.jobId}`);
 
+    // 从 job 中解构出 jobId，剩余的放入 rest
     const { jobId, ...restJob } = job;
 
     const updated: ProcessingJob = {
+        // 必需字段
         jobId,
-        status: job.status || "pending",
-        progress: job.progress || 0,
-        message: job.message || "",
+        status: existing?.status || "pending",
+        progress: existing?.progress ?? 0,
+        message: existing?.message || "",
         createdAt: existing?.createdAt || Date.now(),
+        // updatedAt: Date.now(),
+        // 展开其他字段（不包含 jobId）
         ...restJob,
+        // 确保 updatedAt 始终是最新的
         updatedAt: Date.now(),
     };
 
