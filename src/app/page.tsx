@@ -1517,7 +1517,7 @@ export default function Page() {
                               {Object.entries(moduleDistribution).map(([type, count]) => (
                                   <div key={type} className="flex justify-between text-xs">
                                     <span>{type}</span>
-                                    <span className="font-mono">{count}</span>
+                                    <span className="font-mono">{String(count)}</span>
                                   </div>
                               ))}
                             </div>
