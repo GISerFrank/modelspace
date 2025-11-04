@@ -1,3 +1,4 @@
+// src/app/page.tsx - 重构后的版本
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
@@ -16,7 +17,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SmartImportDialog } from "@/components/SmartImportDialog";
@@ -37,26 +40,28 @@ import {
   Sparkles,
   StickyNote,
   Copy,
-  Plus,        // 新增
-  Minus,       // 新增
-  Maximize2,   // 新增
-  RotateCcw,   // 新增
-  Wand2,       // 新增
+  Plus,
+  Minus,
+  Maximize2,
+  RotateCcw,
+  Wand2,
+  Box,
+  BookOpen,
 } from "lucide-react";
+import { MODULE_KNOWLEDGE } from "@/lib/module-knowledge";
+import {ModelLibrary} from "@/components/ModelLibrary";
 
 /**
- * AI Model Puzzle Builder — Single-file page.tsx
- * - 左侧：模块库与模板；中间：画布；右侧：说明与属性 + AI Chat。
- * - 特性：满屏布局、对齐吸附 & 参考线、连线预览、论文链接胶囊样式、内置本地检索 Chat。
+ * AI Model Puzzle Builder - 重构版
  *
- * 修复&新增：
- * 1) 确保 <DndContext> 与所有 <Card>/<CardContent> 均正确闭合；
- * 2) 定义缺失的 <PaletteItem>；
- * 3) 右侧新增 “AI Chat” 标签页，可在站内检索模块/模型并一键写入备注。
+ * 主要改进：
+ * 1. 三标签布局：模块 / 模型 / 工具
+ * 2. 模块标签：实例参数 + 类型知识（原理/训练/效果）
+ * 3. 模型标签：元信息 + 统计 + 验证 + 全局训练配置
  */
 
-// ===== Constants =====
-const GRID = 80; // 网格尺寸
+// ===== 常量定义 =====
+const GRID = 80;
 const NODE_W = 200;
 const NODE_H = 110;
 const HDR_H = 32;
@@ -64,143 +69,59 @@ const HDR_H = 32;
 const MODULE_TYPES = [
   { type: "Tokenizer", color: "bg-emerald-100", kind: "io", d: { vocab: 32000, model: "BPE" } },
   { type: "Embedding", color: "bg-emerald-100", kind: "core", d: { dim: 768 } },
-  { type: "PositionalEncoding", color: "bg-emerald-100", kind: "core", d: { scheme: "rotary" } },
-  { type: "TransformerEncoder", color: "bg-indigo-100", kind: "encoder", d: { layers: 12, heads: 12, dim: 768 } },
-  { type: "TransformerDecoder", color: "bg-purple-100", kind: "decoder", d: { layers: 12, heads: 12, dim: 768, causal: true } },
-  { type: "Attention", color: "bg-purple-100", kind: "core", d: { heads: 12, dim: 768, causal: true } },
-  { type: "FFN", color: "bg-purple-100", kind: "core", d: { mlp_ratio: 4 } },
-  { type: "CrossAttention", color: "bg-amber-100", kind: "core", d: { heads: 8, dim: 768 } },
-  { type: "VisionEncoder", color: "bg-sky-100", kind: "vision", d: { backbone: "ViT-B/16", dim: 768 } },
-  { type: "TextEncoder", color: "bg-sky-100", kind: "text", d: { backbone: "Transformer", dim: 768 } },
-  { type: "UNet", color: "bg-rose-100", kind: "diffusion", d: { channels: 4, depth: 4 } },
-  { type: "VAE", color: "bg-rose-100", kind: "diffusion", d: { latent: 4 } },
-  { type: "Scheduler", color: "bg-rose-100", kind: "diffusion", d: { type: "DDIM" } },
-  { type: "ProjectionHead", color: "bg-amber-100", kind: "multimodal", d: { dim: 512 } },
-  { type: "ContrastiveLoss", color: "bg-amber-100", kind: "loss", d: {} },
-  { type: "LMHead", color: "bg-purple-100", kind: "head", d: { tied: true } },
-  { type: "ClassifierHead", color: "bg-indigo-100", kind: "head", d: { classes: 2 } },
-  { type: "Adapter/LoRA", color: "bg-lime-100", kind: "finetune", d: { r: 8, alpha: 16 } },
-  { type: "Retriever", color: "bg-lime-100", kind: "tool", d: { topk: 5 } },
-] as const;
+  { type: "Positional Encoding", color: "bg-emerald-100", kind: "core", d: { max_len: 5000 } },
+  { type: "Multi-Head Attention", color: "bg-blue-100", kind: "core", d: { heads: 8, dim: 512 } },
+  { type: "Feed-Forward", color: "bg-purple-100", kind: "core", d: { d_ff: 2048, dropout: 0.1 } },
+  { type: "LayerNorm", color: "bg-amber-100", kind: "norm", d: { eps: 1e-5 } },
+  { type: "Dropout", color: "bg-amber-100", kind: "reg", d: { p: 0.1 } },
+  { type: "Residual", color: "bg-slate-100", kind: "conn", d: {} },
+  { type: "Pooling", color: "bg-cyan-100", kind: "pool", d: { mode: "mean" } },
+  { type: "Linear", color: "bg-rose-100", kind: "io", d: { out: 1000 } },
+  { type: "Softmax", color: "bg-teal-100", kind: "act", d: { dim: -1 } },
+  { type: "ReLU", color: "bg-teal-100", kind: "act", d: {} },
+  { type: "GELU", color: "bg-teal-100", kind: "act", d: {} },
+];
 
-const TEMPLATES: Record<string, () => { nodes: any[]; edges: number[][] }> = {
-  "GPT (Decoder-only)": () => ({
+const TEMPLATES: Record<string, { nodes: any[]; edges: number[][] }> = {
+  "GPT (Decoder-only)": {
     nodes: [
-      n("Tokenizer"),
-      n("Embedding", { dim: 4096 }),
-      n("PositionalEncoding"),
-      n("TransformerDecoder", { layers: 32, heads: 32, dim: 4096, causal: true }),
-      n("LMHead"),
+      { type: "Embedding", props: { dim: 768 }, x: 100, y: 100 },
+      { type: "Positional Encoding", props: { max_len: 2048 }, x: 100, y: 250 },
+      { type: "Multi-Head Attention", props: { heads: 12, dim: 768 }, x: 100, y: 400 },
+      { type: "Feed-Forward", props: { d_ff: 3072 }, x: 100, y: 550 },
+      { type: "LayerNorm", props: {}, x: 100, y: 700 },
+      { type: "Linear", props: { out: 50257 }, x: 100, y: 850 },
     ],
-    edges: [
-      [0, 1],
-      [1, 2],
-      [2, 3],
-      [3, 4],
-    ],
-  }),
-  "BERT (Encoder-only)": () => ({
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+  },
+  "BERT (Encoder-only)": {
     nodes: [
-      n("Tokenizer"),
-      n("Embedding", { dim: 768 }),
-      n("TransformerEncoder", { layers: 12, heads: 12, dim: 768 }),
-      n("ClassifierHead", { classes: 2 }),
+      { type: "Embedding", props: { dim: 768 }, x: 100, y: 100 },
+      { type: "Positional Encoding", props: { max_len: 512 }, x: 100, y: 250 },
+      { type: "Multi-Head Attention", props: { heads: 12, dim: 768 }, x: 100, y: 400 },
+      { type: "LayerNorm", props: {}, x: 100, y: 550 },
+      { type: "Feed-Forward", props: { d_ff: 3072 }, x: 100, y: 700 },
+      { type: "Pooling", props: { mode: "cls" }, x: 100, y: 850 },
     ],
-    edges: [
-      [0, 1],
-      [1, 2],
-      [2, 3],
-    ],
-  }),
-  "T5 (Seq2Seq)": () => ({
-    nodes: [
-      n("Tokenizer"),
-      n("Embedding", { dim: 1024 }),
-      n("TransformerEncoder", { layers: 24, heads: 16, dim: 1024 }),
-      n("TransformerDecoder", { layers: 24, heads: 16, dim: 1024, causal: true }),
-      n("LMHead"),
-    ],
-    edges: [
-      [0, 1],
-      [1, 2],
-      [2, 3],
-      [3, 4],
-    ],
-  }),
-  CLIP: () => ({
-    nodes: [
-      n("VisionEncoder", { backbone: "ViT-B/16", dim: 512 }),
-      n("TextEncoder", { dim: 512 }),
-      n("ProjectionHead", { dim: 512 }),
-      n("ProjectionHead", { dim: 512 }),
-      n("ContrastiveLoss"),
-    ],
-    edges: [
-      [0, 2],
-      [1, 3],
-      [2, 4],
-      [3, 4],
-    ],
-  }),
-  "Stable Diffusion": () => ({
-    nodes: [
-      n("TextEncoder", { backbone: "T5-base", dim: 768 }),
-      n("UNet", { channels: 4, depth: 4 }),
-      n("Scheduler", { type: "DDIM" }),
-      n("VAE", { latent: 4 }),
-    ],
-    edges: [
-      [0, 1],
-      [1, 2],
-      [2, 3],
-    ],
-  }),
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+  },
 };
 
-const MODEL_LIBRARY: Record<
-    string,
-    {
-      title: string;
-      desc: string;
-      primary?: { name: string; url: string };
-      variants?: { name: string; url: string }[];
-    }
-> = {
+const MODEL_LIBRARY: Record<string, {
+  title: string;
+  desc: string;
+  primary?: { name: string; url: string };
+  variants?: { name: string; url: string }[];
+}> = {
   "GPT (Decoder-only)": {
     title: "GPT（Decoder-only）",
     desc: "通用生成：对话、代码、写作、Agent。",
     primary: { name: "Brown et al., 2020 — GPT-3", url: "https://arxiv.org/abs/2005.14165" },
-    variants: [
-      { name: "InstructGPT, 2022", url: "https://arxiv.org/abs/2203.02155" },
-      { name: "LLaMA, 2023", url: "https://arxiv.org/abs/2302.13971" },
-    ],
   },
   "BERT (Encoder-only)": {
     title: "BERT（Encoder-only）",
     desc: "判别/检索：分类、抽取式问答、向量检索。",
     primary: { name: "Devlin et al., 2018 — BERT", url: "https://arxiv.org/abs/1810.04805" },
-    variants: [
-      { name: "RoBERTa, 2019", url: "https://arxiv.org/abs/1907.11692" },
-      { name: "DeBERTa, 2021", url: "https://arxiv.org/abs/2006.03654" },
-    ],
-  },
-  "T5 (Seq2Seq)": {
-    title: "T5（Encoder–Decoder）",
-    desc: "文本到文本：摘要、翻译、指令执行。",
-    primary: { name: "Raffel et al., 2020 — T5", url: "https://jmlr.org/papers/v21/20-074.html" },
-    variants: [{ name: "FLAN-T5, 2022", url: "https://arxiv.org/abs/2210.11416" }],
-  },
-  CLIP: {
-    title: "CLIP（图文对比）",
-    desc: "图文检索、零样本图像分类。",
-    primary: { name: "Radford et al., 2021 — CLIP", url: "https://arxiv.org/abs/2103.00020" },
-    variants: [{ name: "OpenCLIP", url: "https://github.com/mlfoundations/open_clip" }],
-  },
-  "Stable Diffusion": {
-    title: "Stable Diffusion（潜空间扩散）",
-    desc: "文生图、图生图、控制/风格化。",
-    primary: { name: "Rombach et al., 2022 — LDM", url: "https://arxiv.org/abs/2112.10752" },
-    variants: [{ name: "SDXL, 2023", url: "https://arxiv.org/abs/2307.01952" }],
   },
 };
 
@@ -218,19 +139,46 @@ const MODEL_LINKS: Record<string, { github?: string; hf?: string; ms?: string }>
   },
 };
 
-// ===== Utils =====
-const uid = () => Math.random().toString(36).slice(2, 9);
-function n(type: string, props: Record<string, any> = {}) {
-  const def = MODULE_TYPES.find((m) => m.type === type)?.d || {};
-  return { id: uid(), type, props: { ...def, ...props }, x: 0, y: 0 };
+
+// ===== 辅助函数 =====
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+const snapToGrid = (v: number, grid: number) => Math.round(v / grid) * grid;
+
+function explain(nodes: any[], edges: number[][]) {
+  if (nodes.length === 0) {
+    return {
+      headline: "空画布",
+      summary: "尚未添加任何模块",
+      traits: [],
+      apps: [],
+      warnings: [],
+    };
+  }
+
+  const hasAttn = nodes.some((n) => n.type.includes("Attention"));
+  const hasFfn = nodes.some((n) => n.type.includes("Feed-Forward"));
+  const hasEmb = nodes.some((n) => n.type.includes("Embedding"));
+
+  let headline = "自定义架构";
+  let summary = `包含 ${nodes.length} 个模块`;
+  const traits: string[] = [];
+  const apps: string[] = [];
+  const warnings: string[] = [];
+
+  if (hasAttn && hasFfn && hasEmb) {
+    headline = "类 Transformer 架构";
+    traits.push("自注意力", "前馈网络", "位置编码");
+    apps.push("序列建模", "机器翻译", "文本生成");
+  }
+
+  if (edges.length === 0 && nodes.length > 1) {
+    warnings.push("模块间无连接");
+  }
+
+  return { headline, summary, traits, apps, warnings };
 }
-// function clampToCanvas(x: number, y: number) {
-//   const rect = document.getElementById("canvas-root")?.getBoundingClientRect();
-//   if (!rect) return { x, y };
-//   const maxX = Math.max(0, rect.width - NODE_W);
-//   const maxY = Math.max(0, rect.height - NODE_H);
-//   return { x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) };
-// }
+
 function clampToCanvas(x: number, y: number) {
   const canvasW = 1500;
   const canvasH = 1000;
@@ -241,41 +189,62 @@ function clampToCanvas(x: number, y: number) {
 
 // ===== DnD helpers =====
 function PaletteItem({ item }: { item: any }) {
+  const [mounted, setMounted] = useState(false);
+
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `palette-${item.type}`,
     data: { fromPalette: true, item },
   });
+
+  // 添加挂载检查
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const style: React.CSSProperties = {
     transform: isDragging ? undefined : transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-    opacity: isDragging ? 0 : 1,
-    touchAction: "none",
+    opacity: isDragging ? 0.3 : 1,
+    cursor: "grab",
   };
+
+  const color = MODULE_TYPES.find((m) => m.type === item.type)?.color || "bg-slate-100";
+
+  // 如果还没挂载，返回一个静态版本（不包含 dnd 属性）
+  if (!mounted) {
+    return (
+        <div className={`${color} border rounded-lg p-2 text-center text-xs font-medium shadow-sm cursor-grab`}>
+          {item.type}
+        </div>
+    );
+  }
+
+  // 挂载后返回完整的可拖拽版本
   return (
-      <div
-          ref={setNodeRef}
-          {...attributes}
-          {...listeners}
-          style={style}
-          className={`cursor-grab ${item.color} border rounded-xl p-3 shadow-sm hover:shadow-md transition`}
-      >
-        <div className="text-xs text-slate-500">{item.kind}</div>
-        <div className="font-semibold text-xs leading-tight break-words">{item.type}</div>
+      <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={`${color} border rounded-lg p-2 text-center text-xs font-medium shadow-sm`}>
+        {item.type}
       </div>
   );
 }
 
-// ===== Tiny components =====
-const GridBackground = () => (
-    <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `radial-gradient(circle, rgba(148,163,184,.35) 1px, transparent 1px)`,
-          backgroundSize: `${GRID}px ${GRID}px`,
-          backgroundPosition: `calc(${GRID / 2}px) calc(${GRID / 2}px)`,
-        }}
-    />
-);
+// ===== 组件：网格背景 =====
+function GridBackground() {
+  return (
+      <div className="absolute inset-0 pointer-events-none">
+        <div
+            className="w-full h-full"
+            style={{
+              backgroundImage: `
+            linear-gradient(to right, #e5e7eb 1px, transparent 1px),
+            linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)
+          `,
+              backgroundSize: `${GRID}px ${GRID}px`,
+            }}
+        />
+      </div>
+  );
+}
 
+// ===== 组件：画布节点 =====
 function CanvasNode({
                       node,
                       color,
@@ -379,294 +348,101 @@ function CanvasNode({
   );
 }
 
-function ModuleForm({ node, onChange }: any) {
+// ===== 组件：模块参数表单 =====
+function ModuleForm({ node, onChange }: { node: any; onChange: (patch: any) => void }) {
   if (!node) return null;
   const entries = Object.entries(node.props || {});
+
+  const parseMaybeNumber = (v: string) =>
+      /^\d+(\.\d+)?$/.test(v) ? Number(v) : v === "true" ? true : v === "false" ? false : v;
+
   return (
       <div className="space-y-2">
-        <div className="text-sm font-medium">{node.type}</div>
         {entries.length === 0 && <div className="text-xs text-slate-500">该模块暂无可编辑参数</div>}
         {entries.map(([k, v]: any) => (
             <div key={k} className="flex items-center gap-2">
               <div className="w-28 text-xs text-slate-500">{k}</div>
-              <Input value={String(v)} onChange={(e) => onChange({ [k]: parseMaybeNumber(e.target.value) })} />
+              <Input
+                  value={String(v)}
+                  onChange={(e) => onChange({ [k]: parseMaybeNumber(e.target.value) })}
+              />
             </div>
         ))}
       </div>
   );
 }
-const parseMaybeNumber = (v: string) =>
-    /^\d+(\.\d+)?$/.test(v) ? Number(v) : v === "true" ? true : v === "false" ? false : v;
 
-// ===== Heuristic explainer =====
-function explain(nodes: any[], edges: any[]) {
-  const has = (t: string) => nodes.some((n) => n.type === t);
-  const out: string[] = [];
-  const apps = new Set<string>();
-  const traits = new Set<string>();
-  if (has("TransformerDecoder") && !has("TransformerEncoder")) {
-    out.push("Decoder-only transformer (GPT-style)");
-    apps.add("Text generation");
-    traits.add("Causal attention");
-  }
-  if (has("TransformerEncoder") && !has("TransformerDecoder")) {
-    out.push("Encoder-only transformer (BERT-style)");
-    apps.add("Classification / retrieval");
-    traits.add("Bidirectional attention");
-  }
-  if (has("TransformerEncoder") && has("TransformerDecoder")) {
-    out.push("Encoder–decoder transformer (T5)");
-    apps.add("Translation / summarization");
-    traits.add("Cross-attention");
-  }
-  if (has("UNet") && has("VAE") && has("Scheduler") && has("TextEncoder")) {
-    out.push("Text-to-image diffusion (SD-like)");
-    apps.add("Image generation");
-    traits.add("Latent denoising");
-  }
-  if (has("VisionEncoder") && has("TextEncoder") && has("ContrastiveLoss")) {
-    out.push("CLIP-style contrastive");
-    apps.add("Image–text retrieval");
-    traits.add("Shared embedding");
-  }
-  const enc = nodes.find((n) => n.type === "TransformerEncoder")?.props?.layers || 0;
-  const dec = nodes.find((n) => n.type === "TransformerDecoder")?.props?.layers || 0;
-  const dim = nodes.find((n) => ["TransformerEncoder", "TransformerDecoder"].includes(n.type))?.props?.dim;
-  if (dim) traits.add(`Hidden size ≈ ${dim}`);
-  if (enc + dec > 0) out.push(`Rough param proxy ≈ ${Math.round(((enc + dec) * (dim || 512) * 1.2) / 1e3)}M`);
-  return { headline: out[0] || "Custom architecture", apps: [...apps], traits: [...traits], summary: `${nodes.length} modules, ${edges.length} links` };
-}
+// ===== 组件：模块知识展示 =====
+function ModuleKnowledgePanel({ moduleType }: { moduleType: string }) {
+  const knowledge = MODULE_KNOWLEDGE[moduleType];
 
-// ===== Simple local AI Chat (search-based) =====
-function ChatPanel({ conversationId,
-                     canInsertModule,
-                     onInsertModel,
-                     onInsertModule,
-                     selectedNodeType,
-                     modelMeta,     // 新增
-                     nodes,         // 新增
-                     edges,         // 新增
-                   }: {
-  conversationId?: string;
-  canInsertModule: boolean;
-  onInsertModel: (t: string) => void;
-  onInsertModule: (t: string) => void;
-  selectedNodeType?: string | null;
-  modelMeta: { name: string; notes?: string };
-  nodes: any[];
-  edges: number[][];
-}) {
-  type Msg = { role: "user" | "assistant" | "search"; content: string };
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: '👋 我可以帮你查找模块/模型，并把结果整理进备注。试着问："LoRA 是什么？" 或 "搜索 TransformerDecoder 的论文"。' },
-  ]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  // 1) 加载历史
-  useEffect(() => {
-    if (!conversationId) return;
-    (async () => {
-      const r = await fetch(`/api/chat/history?conversationId=${conversationId}`);
-      const { messages: hist } = await r.json();
-      if (Array.isArray(hist) && hist.length) setMessages(hist);
-    })();
-  }, [conversationId]);
-
-  // 2) 在你完成一次AI回复后写回（无论你是本地检索或流式AI）
-  async function persistPair(userText: string, assistantText: string) {
-    if (!conversationId) return;
-    await fetch("/api/chat/append", {
-      method: "POST",
-      body: JSON.stringify({
-        conversationId,
-        messages: [
-          { role: "user", content: userText },
-          { role: "assistant", content: assistantText },
-        ],
-      }),
-    });
-  }
-
-  // 4) 如果是“流式 AI”版本，在流结束时：
-  // await persistPair(userText, finalAssistantText);
-
-  function summarizeModule(m: any) {
-    const kv = Object.entries(m.d || {})
-        .slice(0, 4)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join(", ");
-    return `• ${m.type} (${m.kind}) — ${kv}`;
-  }
-  function localSearch(q: string) {
-    const ql = q.toLowerCase();
-    const mods = MODULE_TYPES.filter((m) => m.type.toLowerCase().includes(ql) || m.kind.toLowerCase().includes(ql));
-    const models = Object.entries(MODEL_LIBRARY).filter(
-        ([k, v]) => k.toLowerCase().includes(ql) || v.title.toLowerCase().includes(ql) || v.desc.toLowerCase().includes(ql)
+  if (!knowledge) {
+    return (
+        <div className="text-sm text-slate-500 text-center py-8">
+          该模块类型暂无知识库内容
+        </div>
     );
-    const parts: string[] = [];
-    if (mods.length) {
-      parts.push(`模块匹配 (${mods.length})\n` + mods.slice(0, 8).map(summarizeModule).join("\n"));
-    }
-    if (models.length) {
-      parts.push(`模型匹配 (${models.length})`);
-      parts.push(models.slice(0, 5).map(([k, v]) => `• ${v.title} — ${v.desc}`).join("\n"));
-      const cites = models
-          .slice(0, 5)
-          .map(([k, v]) => (v.primary?.url ? `- ${v.primary.name}: ${v.primary.url}` : ""))
-          .filter(Boolean);
-      if (cites.length) parts.push("参考：\n" + cites.join("\n"));
-    }
-    if (!parts.length)
-      parts.push('未找到匹配项，尝试换个关键词，比如模块类型（如 "TransformerDecoder"）、场景（如 "对比学习"）或任务（如 "文生图"）。');
-    return parts.join("\n\n");
-  }
-
-  async function onSend(){
-    const q = input.trim(); if(!q) return;
-    setInput(''); setBusy(true);
-
-    // 先把用户消息显示出来 + 占位一条 assistant
-    setMessages(prev => [...prev, { role: 'user', content: q }, { role: 'assistant', content: '' }]);
-    const assistantIndex = messages.length + 1;
-
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          messages: [...messages, { role: 'user', content: q }].map(m => ({ role: m.role, content: m.content })),
-          context: { modelMeta, nodes, edges, selectedNodeType },
-        }),
-      });
-      if (!res.ok || !res.body) throw new Error('network');
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n'); buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const evt = JSON.parse(line);
-            if (evt.type === 'response.output_text.delta') {
-              setMessages(prev => {
-                const copy = [...prev];
-                copy[assistantIndex] = {
-                  role: 'assistant',
-                  content: (copy[assistantIndex]?.content || '') + evt.delta,
-                };
-                return copy;
-              });
-            }
-          } catch {}
-        }
-      }
-    } catch {
-      // 兜底：站内检索
-      const ans = localSearch(q);
-      setMessages(prev => [...prev, { role: 'assistant', content: ans }]);
-    } finally { setBusy(false); }
-  }
-
-
-  function toModel() {
-    const last = messages[messages.length - 1];
-    if (!last || last.role === "user") return;
-    onInsertModel(last.content);
-  }
-  function toModule() {
-    const last = messages[messages.length - 1];
-    if (!last || last.role === "user") return;
-    onInsertModule(last.content);
   }
 
   return (
-      <Card>
-        <CardContent className="p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <MessageSquare className="w-4 h-4" />
-            <div className="font-medium">AI Chat</div>
-            <span className="text-[11px] text-slate-500 inline-flex items-center gap-1">
-            <Sparkles className="w-3 h-3" />
-            Beta
-          </span>
-          </div>
-          <div className="border rounded-md p-2 h-[300px] overflow-auto bg-slate-50/60">
-            {messages.map((m, i) => (
-                <div key={i} className={`text-sm whitespace-pre-wrap ${m.role === "user" ? "text-slate-900" : "text-slate-700"}`} style={{ marginBottom: 8 }}>
-                  {m.role === "user" ? "你：" : "助手："}
-                  {m.content}
+      <Accordion type="single" collapsible className="w-full">
+        {knowledge.principle && (
+            <AccordionItem value="principle">
+              <AccordionTrigger className="text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">📐</span>
+                  <span>原理深入</span>
                 </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-2 mt-2">
-            <Input
-                placeholder="搜索模块/模型，或直接提问…（示例： TransformerDecoder 论文）"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") onSend();
-                }}
-            />
-            <Button onClick={onSend} disabled={busy} className="gap-1">
-              <Send className="w-4 h-4" />
-              发送
-            </Button>
-          </div>
-          <div className="flex items-center gap-2 mt-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" onClick={toModel} className="gap-1">
-                  <StickyNote className="w-3 h-3" />
-                  写入模型备注
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="prose prose-sm max-w-none">
+                  <pre className="whitespace-pre-wrap text-xs">{knowledge.principle}</pre>
+                </div>
+                <Button variant="link" size="sm" className="mt-2 p-0 h-auto text-xs">
+                  查看完整文档 →
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>把上条回复附加到“模型备注”</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-              <span>
-                <Button variant="outline" size="sm" onClick={toModule} disabled={!canInsertModule} className="gap-1">
-                  <StickyNote className="w-3 h-3" />
-                  写入当前模块
-                </Button>
-              </span>
-              </TooltipTrigger>
-              <TooltipContent>{canInsertModule ? `把上条回复附加到 ${selectedNodeType || "选中模块"} 的说明` : "请先选择一个模块"}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      const last = messages[messages.length - 1];
-                      if (!last || last.role === "user") return;
-                      navigator.clipboard?.writeText(last.content);
-                    }}
-                    className="gap-1"
-                >
-                  <Copy className="w-3 h-3" />
-                  复制
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>复制上条回复文本</TooltipContent>
-            </Tooltip>
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500">
-            提示：当前为站内检索实现；若你提供后端接口 <code>/api/chat</code>，可将此面板升级为真正的 LLM 对话。
-          </div>
-        </CardContent>
-      </Card>
+              </AccordionContent>
+            </AccordionItem>
+        )}
+
+        {knowledge.training && (
+            <AccordionItem value="training">
+              <AccordionTrigger className="text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🎯</span>
+                  <span>训练策略</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="prose prose-sm max-w-none">
+                  <pre className="whitespace-pre-wrap text-xs">{knowledge.training}</pre>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+        )}
+
+        {knowledge.demo && (
+            <AccordionItem value="demo">
+              <AccordionTrigger className="text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">✨</span>
+                  <span>效果演示</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="prose prose-sm max-w-none">
+                  <pre className="whitespace-pre-wrap text-xs">{knowledge.demo}</pre>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+        )}
+      </Accordion>
   );
 }
 
-// ===== Page =====
+// ===== 主组件 =====
 export default function Page() {
+  // 状态管理
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<number[][]>([]);
   const [filter, setFilter] = useState("");
@@ -680,14 +456,18 @@ export default function Page() {
   const [activeDrag, setActiveDrag] = useState<any | null>(null);
   const [dragFromPalette, setDragFromPalette] = useState(false);
   const [hover, setHover] = useState<string | null>(null);
-  const [rightTab, setRightTab] = useState("model");
-  const [modelMeta, setModelMeta] = useState<{ name: string; notes: string }>({ name: "My Design", notes: "" });
-  // 在 Page() 函数内部添加这些状态
-  const [zoom, setZoom] = useState(1); // 缩放比例：0.5 - 2.0
-  const [pan, setPan] = useState({ x: 0, y: 0 }); // 平移偏移
-  const [isPanning, setIsPanning] = useState(false); // 是否正在平移
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 }); // 平移起点
-  const [spacePressed, setSpacePressed] = useState(false); // 空格键是否按下
+  const [rightTab, setRightTab] = useState<"module" | "model" | "tools">("module");
+  const [modelMeta, setModelMeta] = useState<{
+    name: string;
+    notes: string;
+    author?: string;
+    version?: string;
+  }>({ name: "My Design", notes: "", author: "", version: "1.0" });
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [spacePressed, setSpacePressed] = useState(false);
   const [smartImportOpen, setSmartImportOpen] = useState(false);
 
   const sensors = useSensors(
@@ -695,12 +475,21 @@ export default function Page() {
       useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
       useSensor(TouchSensor, {
         activationConstraint: {
-          delay: 120,   // 长按触发时间（毫秒）
-          tolerance: 5, // 长按期间允许的手指位移像素
+          delay: 120,
+          tolerance: 5,
         },
-      })  );
+      })
+  );
 
-  // Page 组件内部：
+  const filtered = MODULE_TYPES.filter(
+      (m) =>
+          m.type.toLowerCase().includes(filter.toLowerCase()) ||
+          m.kind.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  const selectedNode = useMemo(() => nodes.find((n) => n.id === sel) || null, [nodes, sel]);
+  const ex = useMemo(() => explain(nodes, edges), [nodes, edges]);
+
   const ensureProjectId = useCallback(() => {
     const url = new URL(location.href);
     let id = url.searchParams.get("p");
@@ -746,227 +535,50 @@ export default function Page() {
     };
   };
 
-  const handleZoom = (delta: number, centerX?: number, centerY?: number) => {
-    setZoom((prevZoom) => {
-      const newZoom = Math.min(Math.max(prevZoom + delta, 0.5), 2);
-      if (centerX !== undefined && centerY !== undefined) {
-        const canvas = document.getElementById("canvas-root");
-        if (canvas) {
-          const rect = canvas.getBoundingClientRect();
-          const x = centerX - rect.left;
-          const y = centerY - rect.top;
-          setPan((prevPan) => ({
-            x: prevPan.x - (x * (newZoom - prevZoom)) / prevZoom,
-            y: prevPan.y - (y * (newZoom - prevZoom)) / prevZoom,
-          }));
-        }
-      }
-      return newZoom;
-    });
-  };
-
-  // const handleWheel = (e: React.WheelEvent) => {
-  //   if (e.ctrlKey || e.metaKey) {
-  //     e.preventDefault();
-  //     const delta = e.deltaY > 0 ? -0.1 : 0.1;
-  //     handleZoom(delta, e.clientX, e.clientY);
-  //   }
-  // };
-  // 滚轮缩放（不需要 Ctrl）
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    handleZoom(delta, e.clientX, e.clientY);
-  };
-
-  // const handlePanStart = (e: React.MouseEvent) => {
-  //   if (spacePressed || e.button === 1) {
-  //     e.preventDefault();
-  //     setIsPanning(true);
-  //     setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-  //   }
-  // };
-
-  // 3. 空格按下时开始平移
-  const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (spacePressed) {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsPanning(true);
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  // 自动切换到模块标签当选中节点时
+  useEffect(() => {
+    if (selectedNode) {
+      setRightTab("module");
     }
-  };
+  }, [selectedNode]);
 
-  const handlePanMove = (e: React.MouseEvent) => {
-    if (isPanning) {
-      setPan({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
-      });
-    }
-  };
-
-  const handlePanEnd = () => {
-    setIsPanning(false);
-  };
-
-  const handleFitToScreen = () => {
-    const canvas = document.getElementById("canvas-root");
-    if (!canvas || nodes.length === 0) return;
-    const rect = canvas.getBoundingClientRect();
-    const bounds = nodes.reduce(
-        (acc, n) => ({
-          minX: Math.min(acc.minX, n.x),
-          minY: Math.min(acc.minY, n.y),
-          maxX: Math.max(acc.maxX, n.x + NODE_W),
-          maxY: Math.max(acc.maxY, n.y + NODE_H),
-        }),
-        { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-    );
-    const contentW = bounds.maxX - bounds.minX;
-    const contentH = bounds.maxY - bounds.minY;
-    const scaleX = (rect.width * 0.9) / contentW;
-    const scaleY = (rect.height * 0.9) / contentH;
-    const newZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.5), 2);
-    const newPan = {
-      x: (rect.width - contentW * newZoom) / 2 - bounds.minX * newZoom,
-      y: (rect.height - contentH * newZoom) / 2 - bounds.minY * newZoom,
-    };
-    setZoom(newZoom);
-    setPan(newPan);
-  };
-
-  const handleResetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  };
-
-  // 在 Page 组件的 useEffect 中添加键盘控制
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !e.repeat) {
-        e.preventDefault();
-        setSpacePressed(true);
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        setSpacePressed(false);
-        setIsPanning(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, []);
-
-// 初次加载：优先云端，其次本地缓存
-  useEffect(() => {
-    const id = ensureProjectId();
-    (async () => {
-      try {
-        const r = await fetch(`/api/state/load?projectId=${id}`);
-        const { data } = await r.json();
-        if (data) {
-          setNodes(data.nodes || []);
-          setEdges(data.edges || []);
-          setModelMeta(data.meta || { name: "My Design", notes: "" });
-          return;
-        }
-      } catch {}
-      try {
-        const saved = localStorage.getItem("puzzle:state:" + id);
-        if (saved) {
-          const s = JSON.parse(saved);
-          setNodes(s.nodes || []);
-          setEdges(s.edges || []);
-          setModelMeta(s.meta || { name: "My Design", notes: "" });
-        }
-      } catch {}
-    })();
-  }, [ensureProjectId]);
-
-// 变更后自动保存（600ms 防抖）：写云端，同时写本地兜底
-  useEffect(() => {
-    const id = new URLSearchParams(location.search).get("p");
-    if (!id) return;
-    const payload = { projectId: id, data: { nodes, edges, meta: modelMeta } };
-    const t = setTimeout(() => {
-      fetch("/api/state/save", { method: "POST", body: JSON.stringify(payload) }).catch(() => {});
-      try { localStorage.setItem("puzzle:state:" + id, JSON.stringify(payload.data)); } catch {}
-    }, 600);
-    return () => clearTimeout(t);
-  }, [nodes, edges, modelMeta]);
-
-  useEffect(() => {
-    loadTemplate(tpl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        if (fromId) setFromId(null);
-        else if (linkMode) setLinkMode(false);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fromId, linkMode]);
-
-  // Self-tests (development only)
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-    try {
-      // edges validity
-      edges.forEach(([f, t]) => {
-        if (typeof f !== "number" || typeof t !== "number") throw new Error("Edge indices must be numbers");
-        if (f === t) throw new Error("Self-loop edge is not allowed");
-        if (f < 0 || f >= nodes.length || t < 0 || t >= nodes.length) throw new Error("Edge index out of range");
-      });
-      // nodes shape & notes type
-      nodes.forEach((n) => {
-        if (!n.id || !n.type) throw new Error("Node missing required fields");
-        if (typeof (n as any).notes !== "undefined" && typeof (n as any).notes !== "string")
-          throw new Error("Node.notes must be a string when present");
-      });
-      // no duplicate edges
-      const edgeKeys = new Set<string>();
-      edges.forEach((e) => {
-        const k = e.join("-");
-        if (edgeKeys.has(k)) throw new Error("Duplicate edge detected");
-        edgeKeys.add(k);
-      });
-      // components
-      console.assert(typeof PaletteItem === "function", "PaletteItem should be defined");
-      console.assert(typeof ChatPanel === "function", "ChatPanel should be defined");
-      // presence of canvas root
-      console.assert(!!document.getElementById("canvas-root"), "canvas-root should exist");
-      // eslint-disable-next-line no-console
-      console.debug("[SelfTests] PASS");
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[SelfTests] FAIL", err);
-    }
-  }, [nodes, edges]);
-
-  function loadTemplate(key: keyof typeof TEMPLATES | string) {
-    const { nodes, edges } = TEMPLATES[key as string]();
-    const laid = nodes.map((node: any, i: number) => ({
-      ...node,
-      x: 120 + i * 180,
-      y: 160 + (i % 2) * 120,
-    }));
-    setNodes(laid);
-    setEdges(edges as any);
+  // 加载模板
+  const loadTemplate = (name: string) => {
+    setTpl(name);
+    const t = TEMPLATES[name];
+    if (!t) return;
+    setNodes(t.nodes.map((n) => ({ ...n, id: uid(), props: { ...n.props } })));
+    setEdges(t.edges);
     setSel(null);
-    setTpl(key as string);
-  }
+  };
+
+  // 导出/导入
+  const handleExport = () => {
+    const data = { nodes, edges, meta: modelMeta };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${modelMeta.name || "model"}.json`;
+    a.click();
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string);
+        setNodes(data.nodes || []);
+        setEdges(data.edges || []);
+        setModelMeta(data.meta || { name: "Imported Model", notes: "" });
+      } catch (err) {
+        alert("导入失败");
+      }
+    };
+    reader.readAsText(file);
+  };
 
   function pointerFromEvent(event: any) {
     const startX = event.activatorEvent?.clientX ?? 0;
@@ -979,11 +591,14 @@ export default function Page() {
     return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
   }
 
-  function onDragStart(e: any) {
+  // 拖放处理
+  function handleDragStart(e: any) {
     setActiveDrag(e.active);
-    setDragFromPalette(!!e.active?.data?.current?.fromPalette);
-  }
-  function onDragMove(e: any) {
+    const fromCanvas = e.active.data?.current?.fromCanvas;
+    setDragFromPalette(!fromCanvas);
+  };
+
+  function handleDragMove(e: any) {
     const { active, delta } = e;
     if (!active?.id || active?.data?.current?.fromPalette) {
       setGuides({ x: null, y: null });
@@ -1028,7 +643,8 @@ export default function Page() {
     }
     setGuides({ x: gx, y: gy });
   }
-  function onDragEnd(e: any) {
+
+  function handleDragEnd(e: any) {
     const { active, delta } = e;
     if (active?.data?.current?.fromPalette) {
       const p = pointerFromEvent(e);
@@ -1090,32 +706,196 @@ export default function Page() {
     setDragFromPalette(false);
   }
 
-  function addEdge(a: string | null, b: string | null) {
-    if (!a || !b || a === b) return;
-    const i = nodes.findIndex((n) => n.id === a),
-        j = nodes.findIndex((n) => n.id === b);
-    if (i < 0 || j < 0) return;
-    if (edges.some(([f, t]) => f === i && t === j)) return;
-    setEdges((e) => [...e, [i, j]]);
-  }
-  function removeNode(id: string) {
-    const idx = nodes.findIndex((n) => n.id === id);
-    if (idx < 0) return;
-    setNodes((p) => p.filter((n) => n.id !== id));
-    setEdges((p) => p.filter(([f, t]) => f !== idx && t !== idx).map(([f, t]) => [f - (f > idx ? 1 : 0), t - (t > idx ? 1 : 0)]));
-    if (sel === id) setSel(null);
-  }
+  // 连线模式
+  const handleNodeClick = (nodeId: string) => {
+    if (!linkMode) {
+      setSel(nodeId);
+      return;
+    }
 
-  function exportJSON() {
-    const data = { meta: modelMeta, nodes, edges };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `model-puzzle-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+    if (!fromId) {
+      setFromId(nodeId);
+      return;
+    }
+
+    const fromIdx = nodes.findIndex((n) => n.id === fromId);
+    const toIdx = nodes.findIndex((n) => n.id === nodeId);
+
+    if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx) {
+      const exists = edges.some(([f, t]) => f === fromIdx && t === toIdx);
+      if (!exists) {
+        setEdges((prev) => [...prev, [fromIdx, toIdx]]);
+      }
+    }
+  };
+
+  // 键盘处理
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat) {
+        e.preventDefault();
+        setSpacePressed(true);
+      }
+      if (e.key === "Escape") {
+        setLinkMode(false);
+        setFromId(null);
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && sel) {
+        const idx = nodes.findIndex((n) => n.id === sel);
+        if (idx !== -1) {
+          setNodes((prev) => prev.filter((_, i) => i !== idx));
+          setEdges((prev) =>
+              prev.filter(([f, t]) => f !== idx && t !== idx).map(([f, t]) => [f > idx ? f - 1 : f, t > idx ? t - 1 : t])
+          );
+          setSel(null);
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        setSpacePressed(false);
+        setIsPanning(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [sel, nodes, edges]);
+
+
+  // 初次加载：优先云端，其次本地缓存
+  useEffect(() => {
+    const id = ensureProjectId();
+    (async () => {
+      try {
+        const r = await fetch(`/api/state/load?projectId=${id}`);
+        const { data } = await r.json();
+        if (data) {
+          setNodes(data.nodes || []);
+          setEdges(data.edges || []);
+          setModelMeta(data.meta || { name: "My Design", notes: "" });
+          return;
+        }
+      } catch {}
+      try {
+        const saved = localStorage.getItem("puzzle:state:" + id);
+        if (saved) {
+          const s = JSON.parse(saved);
+          setNodes(s.nodes || []);
+          setEdges(s.edges || []);
+          setModelMeta(s.meta || { name: "My Design", notes: "" });
+        }
+      } catch {}
+    })();
+  }, [ensureProjectId]);
+
+  // 变更后自动保存（600ms 防抖）：写云端，同时写本地兜底
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get("p");
+    if (!id) return;
+    const payload = { projectId: id, data: { nodes, edges, meta: modelMeta } };
+    const t = setTimeout(() => {
+      fetch("/api/state/save", { method: "POST", body: JSON.stringify(payload) }).catch(() => {});
+      try { localStorage.setItem("puzzle:state:" + id, JSON.stringify(payload.data)); } catch {}
+    }, 600);
+    return () => clearTimeout(t);
+  }, [nodes, edges, modelMeta]);
+
+  useEffect(() => {
+    loadTemplate(tpl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (fromId) setFromId(null);
+        else if (linkMode) setLinkMode(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fromId, linkMode]);
+
+  // Self-tests (development only)
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    try {
+      // edges validity
+      edges.forEach(([f, t]) => {
+        if (typeof f !== "number" || typeof t !== "number") throw new Error("Edge indices must be numbers");
+        if (f === t) throw new Error("Self-loop edge is not allowed");
+        if (f < 0 || f >= nodes.length || t < 0 || t >= nodes.length) throw new Error("Edge index out of range");
+      });
+      // nodes shape & notes type
+      nodes.forEach((n) => {
+        if (!n.id || !n.type) throw new Error("Node missing required fields");
+        if (typeof (n as any).notes !== "undefined" && typeof (n as any).notes !== "string")
+          throw new Error("Node.notes must be a string when present");
+      });
+      // no duplicate edges
+      const edgeKeys = new Set<string>();
+      edges.forEach((e) => {
+        const k = e.join("-");
+        if (edgeKeys.has(k)) throw new Error("Duplicate edge detected");
+        edgeKeys.add(k);
+      });
+      // components
+      console.assert(typeof PaletteItem === "function", "PaletteItem should be defined");
+      // console.assert(typeof ChatPanel === "function", "ChatPanel should be defined");
+      // presence of canvas root
+      console.assert(!!document.getElementById("canvas-root"), "canvas-root should exist");
+      // eslint-disable-next-line no-console
+      console.debug("[SelfTests] PASS");
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[SelfTests] FAIL", err);
+    }
+  }, [nodes, edges]);
+
+  // 画布交互
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (spacePressed) {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    const newZoom = Math.min(Math.max(zoom + delta, 0.5), 2);
+    setZoom(newZoom);
+  };
+
+  const handlePanMove = (e: React.MouseEvent) => {
+    if (isPanning) {
+      setPan({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      });
+    }
+  };
+
+  const handlePanEnd = () => {
+    setIsPanning(false);
+  };
+
+  // 统计模块分布
+  const moduleDistribution = useMemo(() => {
+    return nodes.reduce((acc, n) => {
+      acc[n.type] = (acc[n.type] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [nodes]);
+
   function importJSON(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1134,6 +914,84 @@ export default function Page() {
     };
     r.readAsText(file);
   }
+
+  function exportJSON() {
+    const data = { meta: modelMeta, nodes, edges };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `model-puzzle-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function removeNode(id: string) {
+    const idx = nodes.findIndex((n) => n.id === id);
+    if (idx < 0) return;
+    setNodes((p) => p.filter((n) => n.id !== id));
+    setEdges((p) => p.filter(([f, t]) => f !== idx && t !== idx).map(([f, t]) => [f - (f > idx ? 1 : 0), t - (t > idx ? 1 : 0)]));
+    if (sel === id) setSel(null);
+  }
+
+  function addEdge(a: string | null, b: string | null) {
+    if (!a || !b || a === b) return;
+    const i = nodes.findIndex((n) => n.id === a),
+        j = nodes.findIndex((n) => n.id === b);
+    if (i < 0 || j < 0) return;
+    if (edges.some(([f, t]) => f === i && t === j)) return;
+    setEdges((e) => [...e, [i, j]]);
+  }
+
+  const handleZoom = (delta: number, centerX?: number, centerY?: number) => {
+    setZoom((prevZoom) => {
+      const newZoom = Math.min(Math.max(prevZoom + delta, 0.5), 2);
+      if (centerX !== undefined && centerY !== undefined) {
+        const canvas = document.getElementById("canvas-root");
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const x = centerX - rect.left;
+          const y = centerY - rect.top;
+          setPan((prevPan) => ({
+            x: prevPan.x - (x * (newZoom - prevZoom)) / prevZoom,
+            y: prevPan.y - (y * (newZoom - prevZoom)) / prevZoom,
+          }));
+        }
+      }
+      return newZoom;
+    });
+  };
+
+  const handleFitToScreen = () => {
+    const canvas = document.getElementById("canvas-root");
+    if (!canvas || nodes.length === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const bounds = nodes.reduce(
+        (acc, n) => ({
+          minX: Math.min(acc.minX, n.x),
+          minY: Math.min(acc.minY, n.y),
+          maxX: Math.max(acc.maxX, n.x + NODE_W),
+          maxY: Math.max(acc.maxY, n.y + NODE_H),
+        }),
+        { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+    );
+    const contentW = bounds.maxX - bounds.minX;
+    const contentH = bounds.maxY - bounds.minY;
+    const scaleX = (rect.width * 0.9) / contentW;
+    const scaleY = (rect.height * 0.9) / contentH;
+    const newZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.5), 2);
+    const newPan = {
+      x: (rect.width - contentW * newZoom) / 2 - bounds.minX * newZoom,
+      y: (rect.height - contentH * newZoom) / 2 - bounds.minY * newZoom,
+    };
+    setZoom(newZoom);
+    setPan(newPan);
+  };
+
+  const handleResetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
 
   function handleSmartImport(result: {
     nodes: any[];
@@ -1174,573 +1032,573 @@ export default function Page() {
     }
   }
 
-  const ex = useMemo(() => explain(nodes, edges), [nodes, edges]);
-  const filtered = MODULE_TYPES.filter(
-      (m) => m.type.toLowerCase().includes(filter.toLowerCase()) || m.kind.toLowerCase().includes(filter.toLowerCase())
-  );
-  const selectedNode = useMemo(() => nodes.find((n) => n.id === sel) || null, [nodes, sel]);
-
-  const [overlayAllowed, setOverlayAllowed] = useState(true);
-  useEffect(() => {
-    setOverlayAllowed(dragFromPalette);
-  }, [dragFromPalette]);
-
-  const renderOverlay = () => {
-    // 仅在从左侧“模块库”拖拽时显示 Overlay，避免画布节点出现“影子”重复
-    if (!activeDrag || !overlayAllowed) return null;
-    const item = activeDrag.data?.current?.item;
-    if (!item) return null;
-    const color = MODULE_TYPES.find((m) => m.type === item.type)?.color;
-    return (
-        <div className={`w-[200px] ${color} border rounded-xl shadow-sm`}>
-          <div className="h-[32px] px-3 flex items-center font-medium text-sm">{item.type}</div>
-          <div className="p-3 text-xs text-slate-600">从面板拖拽</div>
-        </div>
-    );
-  };
-
-  const insertToModelNotes = (t: string) => setModelMeta((v) => ({ ...v, notes: v.notes ? v.notes + "\n" + t : t }));
-  const insertToModuleNotes = (t: string) => {
-    if (!sel) return;
-    setNodes((prev) => prev.map((n) => (n.id === sel ? { ...n, notes: n.notes ? n.notes + "\n" + t : t } : n)));
-  };
-
   return (
       <TooltipProvider>
         <DndContext
             sensors={sensors}
             collisionDetection={pointerWithin}
-            onDragStart={onDragStart}
-            onDragMove={onDragMove}
-            onDragEnd={onDragEnd}
+            onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
+            onDragEnd={handleDragEnd}
             onDragCancel={() => setGuides({ x: null, y: null })}
         >
-          <div className="w-full min-h-[100dvh] grid grid-cols-[320px_1fr_380px] gap-4 p-4 bg-slate-50">
-            {/* Left */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Layers className="w-5 h-5" />
-                <div className="font-semibold">模块库</div>
+          <div className="h-screen flex flex-col bg-slate-50">
+            {/* 顶部工具栏 */}
+            <div className="h-14 border-b bg-white flex items-center justify-between px-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-6 h-6 text-blue-600" />
+                <span className="font-bold text-lg">AI Model Builder</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="relative w-full">
-                  <Search className="absolute left-2 top-2.5 w-4 h-4 text-slate-400" />
-                  <Input
-                      placeholder="搜索类型 / kind..."
-                      className="pl-8"
-                      value={filter}
-                      onChange={(e) => setFilter(e.target.value)}
-                  />
-                </div>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" onClick={() => setFilter("")}>
-                      ×
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>清空</TooltipContent>
-                </Tooltip>
-              </div>
-              {/* ===== 新增：智能导入按钮 ===== */}
-              <div className="rounded-lg border bg-gradient-to-r from-purple-50 to-blue-50 p-3">
-                <Button
-                    variant="outline"
-                    className="w-full gap-2 bg-white hover:bg-slate-50"
-                    onClick={() => setSmartImportOpen(true)}
-                >
-                  <Wand2 className="w-4 h-4 text-purple-500" />
-                  <span>智能导入</span>
-                  <Badge variant="secondary" className="ml-auto text-xs">
-                    AI
-                  </Badge>
+                <Button variant="outline" size="sm" onClick={() => setSmartImportOpen(true)}>
+                  <Wand2 className="w-4 h-4 mr-2" />
+                  智能导入
                 </Button>
-                <p className="text-[11px] text-slate-600 mt-2 text-center">
-                  从 GitHub 或 PDF 自动生成模块
-                </p>
+                <Button variant="outline" size="sm" onClick={handleExport}>
+                  <Download className="w-4 h-4 mr-2" />
+                  导出
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <label>
+                    <Upload className="w-4 h-4 mr-2" />
+                    导入
+                    <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+                  </label>
+                </Button>
               </div>
-              {/* ===== 智能导入按钮结束 ===== */}
-              <div className="grid grid-cols-2 gap-2 max-h-[320px] overflow-auto pr-1">
-                {filtered.map((it) => (
-                    <PaletteItem key={it.type} item={it} />
-                ))}
-              </div>
-
-              {/* 模型库 + 论文链接美化 */}
-              <div className="pt-2 space-y-2 max-h-[320px] overflow-auto pr-1">
-                {Object.entries(MODEL_LIBRARY).map(([k, v]) => (
-                    <div key={k} className="rounded-xl border bg-white p-3 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium text-sm">{v.title}</div>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="secondary" onClick={() => loadTemplate(k)}>
-                            加载
-                          </Button>
-                          {v.primary && (
-                              <a
-                                  href={v.primary.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-[11px] px-2 py-0.5 rounded-full border bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                              >
-                                <FileText className="w-3 h-3" />
-                                论文
-                              </a>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-xs text-slate-600 mt-1">{v.desc}</div>
-                      {MODEL_LINKS[k] && (
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {MODEL_LINKS[k].github && (
-                                <a
-                                    className="text-[11px] px-2 py-0.5 rounded-full border bg-slate-50 hover:bg-slate-100"
-                                    href={MODEL_LINKS[k].github}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                >
-                                  GitHub
-                                </a>
-                            )}
-                            {MODEL_LINKS[k].hf && (
-                                <a
-                                    className="text-[11px] px-2 py-0.5 rounded-full border bg-slate-50 hover:bg-slate-100"
-                                    href={MODEL_LINKS[k].hf}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                >
-                                  HuggingFace
-                                </a>
-                            )}
-                          </div>
-                      )}
-                      {v.variants?.length ? (
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {v.variants.slice(0, 3).map((vv, i) => (
-                                <a
-                                    key={i}
-                                    className="text-[11px] px-2 py-0.5 rounded-full border bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                                    href={vv.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                >
-                                  {vv.name}
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                            ))}
-                          </div>
-                      ) : null}
-                    </div>
-                ))}
-              </div>
-
-              <Tabs value={tpl} className="mt-2">
-                <TabsList className="flex flex-wrap gap-2">
-                  {Object.keys(TEMPLATES).map((k) => (
-                      <TabsTrigger key={k} value={k} onClick={() => loadTemplate(k)} className="text-xs">
-                        {k}
-                      </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
             </div>
 
-            {/* Center */}
-            <div className="relative">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Layers className="w-5 h-5"/>
-                  <div className="font-semibold">拼装画布</div>
-                  <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc
-                    取消当前源；按空格+鼠标左键拖拽画布；鼠标滚轮缩放
+            {/* 主内容区 */}
+            <div className="flex-1 grid grid-cols-[320px_1fr_380px] overflow-hidden">
+              {/* 左侧：模块库 */}
+              <div className="min-h-0 bg-slate-50 overflow-y-auto p-4">
+                {/* Left */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-5 h-5"/>
+                    <div className="font-semibold">模块库</div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span>对齐</span>
-                    <Switch checked={snap} onCheckedChange={setSnap}/>
-                  </div>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                          variant={linkMode ? "default" : "outline"}
-                          size="sm"
-                          className="gap-2"
-                          onClick={() => {
-                            setLinkMode((v) => !v);
-                            setFromId(null);
-                          }}
-                      >
-                        <Link2 className="w-4 h-4"/>
-                        连线
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>连线模式：先点源，再连续点多个目标；Esc 取消源</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="outline" size="sm" className="gap-2" onClick={exportJSON}>
-                        <Download className="w-4 h-4"/>
-                        导出
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>导出当前画布的 JSON（nodes + edges + meta）</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <label
-                          className="inline-flex items-center gap-2 cursor-pointer border rounded-md px-3 py-1.5 bg-white text-sm">
-                        <Upload className="w-4 h-4"/>
-                        导入
-                        <Input type="file" accept="application/json" className="hidden" onChange={importJSON}/>
-                      </label>
-                    </TooltipTrigger>
-                    <TooltipContent>导入先前导出的 JSON，恢复画布</TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-
-              <div
-                  id="canvas-root"
-                  className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
-                      linkMode ? "cursor-crosshair" : isPanning ? "cursor-grabbing" : "cursor-grab"
-                  }`}
-                  onWheel={handleWheel}
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={(e) => {
-                    handlePanMove(e);
-                    const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                    setPointer({x: (e.clientX - r.left - pan.x) / zoom, y: (e.clientY - r.top - pan.y) / zoom});
-                  }}
-                  onMouseUp={handlePanEnd}
-                  onMouseLeave={() => {
-                    handlePanEnd();
-                    setPointer(null);
-                  }}
-                  // onClick={() => setSel(null)}
-              >
-                {/* 可缩放平移的内容容器 */}
-                <div
-                    style={{
-                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                      transformOrigin: "0 0",
-                      width: "1500px",
-                      height: "1000px",
-                      position: "relative",
-                      pointerEvents: isPanning ? "none" : "auto", // 平移时禁用内容的鼠标事件
-                    }}
-                    onClick={(e) => {
-                      // 只有点击空白处才取消选择
-                      if (e.target === e.currentTarget) {
-                        setSel(null);
-                      }
-                    }}
-                >
-                  <GridBackground/>
-
-                  {/* guides */}
-                  {guides.x !== null &&
-                      <div className="absolute top-0 bottom-0 w-px bg-blue-400/60" style={{left: guides.x}}/>}
-                  {guides.y !== null &&
-                      <div className="absolute left-0 right-0 h-px bg-blue-400/60" style={{top: guides.y}}/>}
-
-                  {/* edges */}
-                  <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
-                    {edges.map(([f, t], i) => {
-                      const a = nodes[f],
-                          b = nodes[t];
-                      if (!a || !b) return null;
-                      const x1 = a.x + NODE_W / 2,
-                          y1 = a.y + HDR_H,
-                          x2 = b.x + NODE_W / 2,
-                          y2 = b.y + HDR_H,
-                          mx = (x1 + x2) / 2;
-                      return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#94a3b8"
-                                   strokeWidth="2" fill="none" markerEnd="url(#arrow)"/>;
-                    })}
-                    {linkMode &&
-                        fromId &&
-                        pointer &&
-                        (() => {
-                          const a = nodes.find((n) => n.id === fromId);
-                          if (!a) return null;
-                          const x1 = a.x + NODE_W / 2,
-                              y1 = a.y + HDR_H,
-                              x2 = pointer.x,
-                              y2 = pointer.y,
-                              mx = (x1 + x2) / 2;
-                          return <path d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#60a5fa"
-                                       strokeWidth="2" fill="none" strokeDasharray="6 6"/>;
-                        })()}
-                    <defs>
-                      <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6"
-                              orient="auto-start-reverse">
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
-                      </marker>
-                    </defs>
-                  </svg>
-
-                  {/* nodes */}
-                  {nodes.map((n) => (
-                      <CanvasNode
-                          key={n.id}
-                          node={n}
-                          color={MODULE_TYPES.find((m) => m.type === n.type)?.color}
-                          selected={sel === n.id}
-                          onSelect={() => setSel(n.id)}
-                          onRemove={() => removeNode(n.id)}
-                          onInfo={() => {
-                          }}
-                          linkMode={linkMode}
-                          isSource={fromId === n.id}
-                          isHot={hover === n.id}
-                          onHoverIn={() => setHover(n.id)}
-                          onHoverOut={() => setHover((prev) => (prev === n.id ? null : prev))}
-                          onClick={() => {
-                            if (linkMode) {
-                              if (!fromId) {
-                                setFromId(n.id);
-                              } else if (fromId !== n.id) {
-                                addEdge(fromId, n.id);
-                              } else {
-                                setFromId(null);
-                              }
-                            } else {
-                              setSel(n.id);
-                            }
-                          }}
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-full">
+                      <Search className="absolute left-2 top-2.5 w-4 h-4 text-slate-400"/>
+                      <Input
+                          placeholder="搜索类型 / kind..."
+                          className="pl-8"
+                          value={filter}
+                          onChange={(e) => setFilter(e.target.value)}
                       />
-                  ))}
-                </div>
-
-                {/* 缩放控制面板 - 添加在 canvas-root 内部，缩放容器外部 */}
-                <div className="absolute bottom-4 right-4 flex flex-col gap-2 bg-white rounded-lg shadow-md p-2 border z-10">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleZoom(0.1)}
-                          disabled={zoom >= 2}
-                          className="h-8 w-8"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>放大</TooltipContent>
-                  </Tooltip>
-
-                  <div className="text-xs text-center font-mono text-slate-600 py-1 select-none">
-                    {Math.round(zoom * 100)}%
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="outline" size="icon" onClick={() => setFilter("")}>
+                          ×
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>清空</TooltipContent>
+                    </Tooltip>
+                  </div>
+                  {/* ===== 新增：智能导入按钮 ===== */}
+                  <div className="rounded-lg border bg-gradient-to-r from-purple-50 to-blue-50 p-3">
+                    <Button
+                        variant="outline"
+                        className="w-full gap-2 bg-white hover:bg-slate-50"
+                        onClick={() => setSmartImportOpen(true)}
+                    >
+                      <Wand2 className="w-4 h-4 text-purple-500"/>
+                      <span>智能导入</span>
+                      <Badge variant="secondary" className="ml-auto text-xs">
+                        AI
+                      </Badge>
+                    </Button>
+                    <p className="text-[11px] text-slate-600 mt-2 text-center">
+                      从 GitHub 或 PDF 自动生成模块
+                    </p>
+                  </div>
+                  {/* ===== 智能导入按钮结束 ===== */}
+                  <div className="grid grid-cols-2 gap-2 max-h-[320px] overflow-auto pr-1">
+                    {filtered.map((it) => (
+                        <PaletteItem key={it.type} item={it}/>
+                    ))}
                   </div>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleZoom(-0.1)}
-                          disabled={zoom <= 0.5}
-                          className="h-8 w-8"
-                      >
-                        <Minus className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>缩小</TooltipContent>
-                  </Tooltip>
+                  <ModelLibrary
+                      modelLibrary={MODEL_LIBRARY}
+                      modelLinks={MODEL_LINKS}
+                      onLoadTemplate={loadTemplate}
+                  />
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={handleFitToScreen}
-                          className="h-8 w-8"
-                      >
-                        <Maximize2 className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>适应画布</TooltipContent>
-                  </Tooltip>
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={handleResetView}
-                          className="h-8 w-8"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>重置视图</TooltipContent>
-                  </Tooltip>
+                  <Tabs value={tpl} className="mt-2">
+                    <TabsList className="flex flex-wrap gap-2">
+                      {Object.keys(TEMPLATES).map((k) => (
+                          <TabsTrigger key={k} value={k} onClick={() => loadTemplate(k)} className="text-xs">
+                            {k}
+                          </TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </Tabs>
                 </div>
               </div>
-            </div>
 
-            {/* Right */}
-            <div className="space-y-3">
-              <Tabs value={rightTab} onValueChange={setRightTab}>
-                <TabsList className="grid grid-cols-3 w-full">
-                  <TabsTrigger value="model">模型</TabsTrigger>
-                  <TabsTrigger value="module">模块</TabsTrigger>
-                  <TabsTrigger value="chat">AI</TabsTrigger>
-                </TabsList>
-
-                {/* 模型 Tab */}
-                <div className={rightTab === "model" ? "" : "hidden"}>
-                  <Card>
-                    <CardContent className="p-4 space-y-3">
-                      <div className="text-xs text-slate-500">模型说明</div>
-                      <div className="font-semibold">{ex.headline}</div>
-                      <div className="text-xs text-slate-600">{ex.summary}</div>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {ex.traits.map((t, i) => (
-                            <Badge key={i} variant="secondary">
-                              {t}
-                            </Badge>
-                        ))}
-                      </div>
-                      <div className="text-sm pt-2">
-                        <div className="font-medium">可能的应用：</div>
-                        <ul className="list-disc pl-5 text-slate-700">
-                          {ex.apps.map((a, i) => (
-                              <li key={i}>{a}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="mt-3">
-                    <CardContent className="p-4 space-y-3">
-                      <div className="text-xs text-slate-500">模型属性</div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 text-xs text-slate-500">名称</div>
-                        <Input value={modelMeta.name} onChange={(e) => setModelMeta((v) => ({ ...v, name: e.target.value }))} />
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <div className="w-24 text-xs text-slate-500">备注</div>
-                        <textarea
-                            value={modelMeta.notes}
-                            onChange={(e) => setModelMeta((v) => ({ ...v, notes: e.target.value }))}
-                            className="flex-1 min-h-[88px] rounded-md border px-3 py-2 text-sm"
-                            placeholder="关于此模型的说明、约束、训练/推理注意点等"
-                        />
-                      </div>
-                      <div className="text-[11px] text-slate-500">导出时会附带这些元信息。</div>
-                    </CardContent>
-                  </Card>
-
-                  {/* 开发模式测试 */}
-                  {process.env.NODE_ENV !== "production" && (
-                      <Card className="mt-3">
-                        <CardContent className="p-4 space-y-2">
-                          <div className="text-xs text-slate-500">Dev Tests</div>
-                          <div className="flex gap-2 flex-wrap">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  if (nodes[0]) setSel(nodes[0].id);
-                                }}
-                            >
-                              选中第一个节点
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => setSel(null)}>
-                              清除选中
-                            </Button>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  const bad = [...edges, [0, 0]];
-                                  console.log("Inject bad edge (self-loop) for validator demo", bad);
-                                }}
-                            >
-                              注入自环测试
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                  )}
+              {/* Center */}
+              <div className="relative min-h-0 overflow-y-auto p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-5 h-5"/>
+                    <div className="font-semibold">拼装画布</div>
+                    <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc
+                      取消当前源；按空格+鼠标左键拖拽画布；鼠标滚轮缩放
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span>对齐</span>
+                      <Switch checked={snap} onCheckedChange={setSnap}/>
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                            variant={linkMode ? "default" : "outline"}
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => {
+                              setLinkMode((v) => !v);
+                              setFromId(null);
+                            }}
+                        >
+                          <Link2 className="w-4 h-4"/>
+                          连线
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>连线模式：先点源，再连续点多个目标；Esc 取消源</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="outline" size="sm" className="gap-2" onClick={exportJSON}>
+                          <Download className="w-4 h-4"/>
+                          导出
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>导出当前画布的 JSON（nodes + edges + meta）</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <label
+                            className="inline-flex items-center gap-2 cursor-pointer border rounded-md px-3 py-1.5 bg-white text-sm">
+                          <Upload className="w-4 h-4"/>
+                          导入
+                          <Input type="file" accept="application/json" className="hidden" onChange={importJSON}/>
+                        </label>
+                      </TooltipTrigger>
+                      <TooltipContent>导入先前导出的 JSON，恢复画布</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
 
-                {/* 模块 Tab */}
-                <div className={rightTab === "module" ? "" : "hidden"}>
-                  <Card>
-                    <CardContent className="p-4 space-y-3">
-                      <div className="text-xs text-slate-500">模块说明</div>
-                      {sel ? (
-                          <div className="mt-2 space-y-2">
-                            <div className="text-[11px] text-slate-500">为当前选中模块添加说明：</div>
-                            <textarea
-                                value={selectedNode?.notes ?? ""}
-                                onChange={(e) =>
-                                    setNodes((prev) => prev.map((n) => (n.id === sel ? { ...n, notes: e.target.value } : n)))
+                <div
+                    id="canvas-root"
+                    className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
+                        linkMode ? "cursor-crosshair" : isPanning ? "cursor-grabbing" : "cursor-grab"
+                    }`}
+                    onWheel={handleWheel}
+                    onMouseDown={handleCanvasMouseDown}
+                    onMouseMove={(e) => {
+                      handlePanMove(e);
+                      const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      setPointer({x: (e.clientX - r.left - pan.x) / zoom, y: (e.clientY - r.top - pan.y) / zoom});
+                    }}
+                    onMouseUp={handlePanEnd}
+                    onMouseLeave={() => {
+                      handlePanEnd();
+                      setPointer(null);
+                    }}
+                    // onClick={() => setSel(null)}
+                >
+                  {/* 可缩放平移的内容容器 */}
+                  <div
+                      style={{
+                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                        transformOrigin: "0 0",
+                        width: "1500px",
+                        height: "1000px",
+                        position: "relative",
+                        pointerEvents: isPanning ? "none" : "auto", // 平移时禁用内容的鼠标事件
+                      }}
+                      onClick={(e) => {
+                        // 只有点击空白处才取消选择
+                        if (e.target === e.currentTarget) {
+                          setSel(null);
+                        }
+                      }}
+                  >
+                    <GridBackground/>
+
+                    {/* guides */}
+                    {guides.x !== null &&
+                        <div className="absolute top-0 bottom-0 w-px bg-blue-400/60" style={{left: guides.x}}/>}
+                    {guides.y !== null &&
+                        <div className="absolute left-0 right-0 h-px bg-blue-400/60" style={{top: guides.y}}/>}
+
+                    {/* edges */}
+                    <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
+                      {edges.map(([f, t], i) => {
+                        const a = nodes[f],
+                            b = nodes[t];
+                        if (!a || !b) return null;
+                        const x1 = a.x + NODE_W / 2,
+                            y1 = a.y + HDR_H,
+                            x2 = b.x + NODE_W / 2,
+                            y2 = b.y + HDR_H,
+                            mx = (x1 + x2) / 2;
+                        return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
+                                     stroke="#94a3b8"
+                                     strokeWidth="2" fill="none" markerEnd="url(#arrow)"/>;
+                      })}
+                      {linkMode &&
+                          fromId &&
+                          pointer &&
+                          (() => {
+                            const a = nodes.find((n) => n.id === fromId);
+                            if (!a) return null;
+                            const x1 = a.x + NODE_W / 2,
+                                y1 = a.y + HDR_H,
+                                x2 = pointer.x,
+                                y2 = pointer.y,
+                                mx = (x1 + x2) / 2;
+                            return <path d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#60a5fa"
+                                         strokeWidth="2" fill="none" strokeDasharray="6 6"/>;
+                          })()}
+                      <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6"
+                                orient="auto-start-reverse">
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+                        </marker>
+                      </defs>
+                    </svg>
+
+                    {/* nodes */}
+                    {nodes.map((n) => (
+                        <CanvasNode
+                            key={n.id}
+                            node={n}
+                            color={MODULE_TYPES.find((m) => m.type === n.type)?.color}
+                            selected={sel === n.id}
+                            onSelect={() => setSel(n.id)}
+                            onRemove={() => removeNode(n.id)}
+                            onInfo={() => {
+                            }}
+                            linkMode={linkMode}
+                            isSource={fromId === n.id}
+                            isHot={hover === n.id}
+                            onHoverIn={() => setHover(n.id)}
+                            onHoverOut={() => setHover((prev) => (prev === n.id ? null : prev))}
+                            onClick={() => {
+                              if (linkMode) {
+                                if (!fromId) {
+                                  setFromId(n.id);
+                                } else if (fromId !== n.id) {
+                                  addEdge(fromId, n.id);
+                                } else {
+                                  setFromId(null);
                                 }
-                                className="w-full min-h-[100px] rounded-md border px-3 py-2 text-sm"
-                                placeholder="为该模块写点说明…（用途、输入/输出、依赖、注意事项、超参策略等）"
-                            />
-                            <div className="text-[11px] text-slate-500">说明会随导出一起保存到对应模块。</div>
-                          </div>
-                      ) : null}
-                      {sel ? (
-                          <>
-                            <div className="font-medium text-sm">{nodes.find((n) => n.id === sel)?.type}</div>
-                            <div className="text-xs text-slate-600">在下方编辑该模块参数。</div>
-                          </>
-                      ) : (
-                          <div className="text-slate-500 text-sm">未选择模块</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                  <Card className="mt-3">
-                    <CardContent className="p-4 space-y-3">
-                      <div className="text-xs text-slate-500">模块属性</div>
-                      {sel ? (
-                          <ModuleForm
-                              node={nodes.find((n) => n.id === sel)}
-                              onChange={(patch: any) =>
-                                  setNodes((prev) =>
-                                      prev.map((n) => (n.id === sel ? { ...n, props: { ...n.props, ...patch } } : n))
-                                  )
+                              } else {
+                                setSel(n.id);
                               }
-                          />
-                      ) : (
-                          <div className="text-slate-500 text-sm">选择画布上的模块以编辑参数</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
+                            }}
+                        />
+                    ))}
+                  </div>
 
-                {/* AI Chat Tab */}
-                <div className={rightTab === "chat" ? "" : "hidden"}>
-                  <ChatPanel
-                      canInsertModule={!!sel}
-                      onInsertModel={insertToModelNotes}
-                      onInsertModule={insertToModuleNotes}
-                      selectedNodeType={selectedNode?.type || null}
-                      modelMeta={modelMeta}
-                      nodes={nodes}
-                      edges={edges}
-                      conversationId={convId}
-                  />
+                  {/* 缩放控制面板 - 添加在 canvas-root 内部，缩放容器外部 */}
+                  <div
+                      className="absolute bottom-4 right-4 flex flex-col gap-2 bg-white rounded-lg shadow-md p-2 border z-10">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleZoom(0.1)}
+                            disabled={zoom >= 2}
+                            className="h-8 w-8"
+                        >
+                          <Plus className="w-4 h-4"/>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>放大</TooltipContent>
+                    </Tooltip>
+
+                    <div className="text-xs text-center font-mono text-slate-600 py-1 select-none">
+                      {Math.round(zoom * 100)}%
+                    </div>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleZoom(-0.1)}
+                            disabled={zoom <= 0.5}
+                            className="h-8 w-8"
+                        >
+                          <Minus className="w-4 h-4"/>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>缩小</TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={handleFitToScreen}
+                            className="h-8 w-8"
+                        >
+                          <Maximize2 className="w-4 h-4"/>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>适应画布</TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={handleResetView}
+                            className="h-8 w-8"
+                        >
+                          <RotateCcw className="w-4 h-4"/>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>重置视图</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
-              </Tabs>
+              </div>
+
+              {/* 右侧：信息面板 */}
+              <div className="min-h-0 border-l bg-white overflow-y-auto">
+                <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as any)} className="h-full flex flex-col">
+                  <TabsList className="grid grid-cols-3 w-full shrink-0">
+                    <TabsTrigger value="module" className="flex items-center gap-1 text-xs">
+                      <Box className="w-3 h-3"/>
+                      模块
+                    </TabsTrigger>
+                    <TabsTrigger value="model" className="flex items-center gap-1 text-xs">
+                      <Layers className="w-3 h-3"/>
+                      模型
+                    </TabsTrigger>
+                    <TabsTrigger value="tools" className="flex items-center gap-1 text-xs">
+                      <Wand2 className="w-3 h-3"/>
+                      工具
+                    </TabsTrigger>
+                  </TabsList>
+
+                  {/* 模块标签 */}
+                  <TabsContent value="module" className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {selectedNode ? (
+                        <>
+                          {/* 实例级内容 */}
+                          <div className="pb-4 border-b">
+                            <div className="text-xs text-slate-500 mb-1">当前选中</div>
+                            <div className="text-lg font-semibold flex items-center gap-2">
+                              {selectedNode.type}
+                              <Badge variant="outline" className="text-xs">
+                                #{nodes.findIndex((n) => n.id === selectedNode.id) + 1}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          <Accordion type="multiple" defaultValue={["params", "notes"]} className="w-full">
+                            <AccordionItem value="params">
+                              <AccordionTrigger className="text-sm">⚙️ 实例参数</AccordionTrigger>
+                              <AccordionContent>
+                                <ModuleForm
+                                    node={selectedNode}
+                                    onChange={(patch: any) =>
+                                        setNodes((prev) =>
+                                            prev.map((n) => (n.id === sel ? {...n, props: {...n.props, ...patch}} : n))
+                                        )
+                                    }
+                                />
+                              </AccordionContent>
+                            </AccordionItem>
+
+                            <AccordionItem value="notes">
+                              <AccordionTrigger className="text-sm">📝 实例说明</AccordionTrigger>
+                              <AccordionContent>
+                                <Textarea
+                                    value={selectedNode.notes || ""}
+                                    onChange={(e) =>
+                                        setNodes((prev) =>
+                                            prev.map((n) => (n.id === sel ? {...n, notes: e.target.value} : n))
+                                        )
+                                    }
+                                    placeholder="为这个特定的模块实例添加说明..."
+                                    className="min-h-[100px]"
+                                />
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+
+                          {/* 类型级知识 */}
+                          <div className="pt-4 border-t">
+                            <div className="text-xs text-slate-500 mb-3">模块类型知识库（通用）</div>
+                            <ModuleKnowledgePanel moduleType={selectedNode.type}/>
+                          </div>
+                        </>
+                    ) : (
+                        <div className="text-center text-slate-400 py-12">
+                          <Box className="w-12 h-12 mx-auto mb-4 opacity-50"/>
+                          <p className="text-sm">点击画布上的模块以查看详情</p>
+                        </div>
+                    )}
+                  </TabsContent>
+
+                  {/* 模型标签 */}
+                  <TabsContent value="model" className="flex-1 overflow-y-auto p-4">
+                    <Accordion type="multiple" defaultValue={["meta", "stats"]} className="w-full">
+                      <AccordionItem value="meta">
+                        <AccordionTrigger className="text-sm">🏛️ 模型元信息</AccordionTrigger>
+                        <AccordionContent className="space-y-3">
+                          <div>
+                            <label className="text-xs text-slate-500">名称</label>
+                            <Input
+                                value={modelMeta.name}
+                                onChange={(e) => setModelMeta({...modelMeta, name: e.target.value})}
+                                placeholder="模型名称"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-500">作者</label>
+                            <Input
+                                value={modelMeta.author || ""}
+                                onChange={(e) => setModelMeta({...modelMeta, author: e.target.value})}
+                                placeholder="作者"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-500">版本</label>
+                            <Input
+                                value={modelMeta.version || ""}
+                                onChange={(e) => setModelMeta({...modelMeta, version: e.target.value})}
+                                placeholder="版本号"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-500">整体说明</label>
+                            <Textarea
+                                value={modelMeta.notes}
+                                onChange={(e) => setModelMeta({...modelMeta, notes: e.target.value})}
+                                placeholder="模型整体说明..."
+                                className="min-h-[120px]"
+                            />
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="stats">
+                        <AccordionTrigger className="text-sm">📊 架构统计</AccordionTrigger>
+                        <AccordionContent className="space-y-3">
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span>模块总数</span>
+                              <Badge>{nodes.length}</Badge>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>连接数</span>
+                              <Badge>{edges.length}</Badge>
+                            </div>
+                          </div>
+
+                          <div className="mt-4">
+                            <div className="text-xs text-slate-500 mb-2">模块分布</div>
+                            <div className="space-y-1">
+                              {Object.entries(moduleDistribution).map(([type, count]) => (
+                                  <div key={type} className="flex justify-between text-xs">
+                                    <span>{type}</span>
+                                    <span className="font-mono">{count}</span>
+                                  </div>
+                              ))}
+                            </div>
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="validation">
+                        <AccordionTrigger className="text-sm">✅ 架构检查</AccordionTrigger>
+                        <AccordionContent>
+                          <div className="space-y-3">
+                            <div>
+                              <div className="font-medium text-sm mb-1">{ex.headline}</div>
+                              <div className="text-xs text-slate-600">{ex.summary}</div>
+                            </div>
+
+                            {ex.traits.length > 0 && (
+                                <div>
+                                  <div className="text-xs text-slate-500 mb-1">特征</div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {ex.traits.map((t, i) => (
+                                        <Badge key={i} variant="secondary" className="text-xs">
+                                          {t}
+                                        </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                            )}
+
+                            {ex.warnings.length > 0 && (
+                                <div>
+                                  <div className="text-xs text-slate-500 mb-1">警告</div>
+                                  {ex.warnings.map((w, i) => (
+                                      <div key={i} className="text-xs text-amber-600">
+                                        ⚠️ {w}
+                                      </div>
+                                  ))}
+                                </div>
+                            )}
+
+                            {ex.warnings.length === 0 && nodes.length > 0 && (
+                                <div className="text-xs text-green-600">✓ 架构验证通过</div>
+                            )}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  </TabsContent>
+
+                  {/* 工具标签 */}
+                  <TabsContent value="tools" className="flex-1 overflow-y-auto p-4">
+                    <div className="text-center text-slate-400 py-12">
+                      <Wand2 className="w-12 h-12 mx-auto mb-4 opacity-50"/>
+                      <p className="text-sm">AI Chat 和其他工具即将到来</p>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </div>
             </div>
           </div>
 
-          {/* ===== 新增：智能导入对话框 ===== */}
+          {/* 智能导入对话框 */}
           <SmartImportDialog
               open={smartImportOpen}
               onOpenChange={setSmartImportOpen}
               onImport={handleSmartImport}
           />
-          {/* ===== 智能导入对话框结束 ===== */}
 
-          <DragOverlay dropAnimation={null}>{renderOverlay()}</DragOverlay>
+          <DragOverlay dropAnimation={null}>
+            {activeDrag && dragFromPalette && (() => {
+              const item = activeDrag.data?.current?.item;
+              if (!item) return null;
+              const color = MODULE_TYPES.find((m) => m.type === item.type)?.color;
+              return (
+                  <div className={`w-[200px] ${color} border rounded-xl shadow-lg`}>
+                    <div className="h-[32px] px-3 flex items-center font-medium text-sm">{item.type}</div>
+                    <div className="p-3 text-xs text-slate-600">从面板拖拽</div>
+                  </div>
+              );
+            })()}
+          </DragOverlay>
         </DndContext>
       </TooltipProvider>
   );
