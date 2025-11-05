@@ -1,7 +1,7 @@
 // src/app/page.tsx - 重构后的版本
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -46,10 +46,14 @@ import {
   RotateCcw,
   Wand2,
   Box,
-  BookOpen,
+  BookOpen, ChevronLeft,
 } from "lucide-react";
 import { MODULE_KNOWLEDGE } from "@/lib/module-knowledge";
 import {ModelLibrary} from "@/components/ModelLibrary";
+// 在文件顶部
+import { ChatPanel } from "@/components/ChatPanel";
+import { MODULE_TYPES, MODEL_LIBRARY, MODEL_LINKS, TEMPLATES } from "@/lib/constants";
+import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelHandle } from "react-resizable-panels";
 
 /**
  * AI Model Puzzle Builder - 重构版
@@ -66,84 +70,38 @@ const NODE_W = 200;
 const NODE_H = 110;
 const HDR_H = 32;
 
-const MODULE_TYPES = [
-  { type: "Tokenizer", color: "bg-emerald-100", kind: "io", d: { vocab: 32000, model: "BPE" } },
-  { type: "Embedding", color: "bg-emerald-100", kind: "core", d: { dim: 768 } },
-  { type: "Positional Encoding", color: "bg-emerald-100", kind: "core", d: { max_len: 5000 } },
-  { type: "Multi-Head Attention", color: "bg-blue-100", kind: "core", d: { heads: 8, dim: 512 } },
-  { type: "Feed-Forward", color: "bg-purple-100", kind: "core", d: { d_ff: 2048, dropout: 0.1 } },
-  { type: "LayerNorm", color: "bg-amber-100", kind: "norm", d: { eps: 1e-5 } },
-  { type: "Dropout", color: "bg-amber-100", kind: "reg", d: { p: 0.1 } },
-  { type: "Residual", color: "bg-slate-100", kind: "conn", d: {} },
-  { type: "Pooling", color: "bg-cyan-100", kind: "pool", d: { mode: "mean" } },
-  { type: "Linear", color: "bg-rose-100", kind: "io", d: { out: 1000 } },
-  { type: "Softmax", color: "bg-teal-100", kind: "act", d: { dim: -1 } },
-  { type: "ReLU", color: "bg-teal-100", kind: "act", d: {} },
-  { type: "GELU", color: "bg-teal-100", kind: "act", d: {} },
-];
-
-const TEMPLATES: Record<string, { nodes: any[]; edges: number[][] }> = {
-  "GPT (Decoder-only)": {
-    nodes: [
-      { type: "Embedding", props: { dim: 768 }, x: 100, y: 100 },
-      { type: "Positional Encoding", props: { max_len: 2048 }, x: 100, y: 250 },
-      { type: "Multi-Head Attention", props: { heads: 12, dim: 768 }, x: 100, y: 400 },
-      { type: "Feed-Forward", props: { d_ff: 3072 }, x: 100, y: 550 },
-      { type: "LayerNorm", props: {}, x: 100, y: 700 },
-      { type: "Linear", props: { out: 50257 }, x: 100, y: 850 },
-    ],
-    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
-  },
-  "BERT (Encoder-only)": {
-    nodes: [
-      { type: "Embedding", props: { dim: 768 }, x: 100, y: 100 },
-      { type: "Positional Encoding", props: { max_len: 512 }, x: 100, y: 250 },
-      { type: "Multi-Head Attention", props: { heads: 12, dim: 768 }, x: 100, y: 400 },
-      { type: "LayerNorm", props: {}, x: 100, y: 550 },
-      { type: "Feed-Forward", props: { d_ff: 3072 }, x: 100, y: 700 },
-      { type: "Pooling", props: { mode: "cls" }, x: 100, y: 850 },
-    ],
-    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
-  },
-};
-
-const MODEL_LIBRARY: Record<string, {
-  title: string;
-  desc: string;
-  primary?: { name: string; url: string };
-  variants?: { name: string; url: string }[];
-}> = {
-  "GPT (Decoder-only)": {
-    title: "GPT（Decoder-only）",
-    desc: "通用生成：对话、代码、写作、Agent。",
-    primary: { name: "Brown et al., 2020 — GPT-3", url: "https://arxiv.org/abs/2005.14165" },
-  },
-  "BERT (Encoder-only)": {
-    title: "BERT（Encoder-only）",
-    desc: "判别/检索：分类、抽取式问答、向量检索。",
-    primary: { name: "Devlin et al., 2018 — BERT", url: "https://arxiv.org/abs/1810.04805" },
-  },
-};
-
-const MODEL_LINKS: Record<string, { github?: string; hf?: string; ms?: string }> = {
-  "GPT (Decoder-only)": { github: "https://github.com/karpathy/nanoGPT", hf: "https://huggingface.co/gpt2" },
-  "BERT (Encoder-only)": { github: "https://github.com/google-research/bert", hf: "https://huggingface.co/bert-base-uncased" },
-  "T5 (Seq2Seq)": {
-    github: "https://github.com/google-research/text-to-text-transfer-transformer",
-    hf: "https://huggingface.co/t5-base",
-  },
-  CLIP: { github: "https://github.com/openai/CLIP", hf: "https://huggingface.co/openai/clip-vit-base-patch32" },
-  "Stable Diffusion": {
-    github: "https://github.com/CompVis/stable-diffusion",
-    hf: "https://huggingface.co/runwayml/stable-diffusion-v1-5",
-  },
-};
-
-
 // ===== 辅助函数 =====
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 const snapToGrid = (v: number, grid: number) => Math.round(v / grid) * grid;
+
+// 在文件顶部添加这个组件
+function CollapsibleResizeHandle({
+                                   onDoubleClick,
+                                   className = ""
+                                 }: {
+  onDoubleClick?: () => void;
+  className?: string;
+}) {
+  return (
+      <PanelResizeHandle
+          className={`relative group ${className}`}
+          onDoubleClick={onDoubleClick}
+      >
+        <div className="w-1 h-full bg-slate-200 group-hover:bg-blue-400 transition-colors" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <div className="flex flex-col gap-1 items-center">
+            <div className="w-1 h-2 bg-white rounded-full" />
+            <div className="w-1 h-2 bg-white rounded-full" />
+            <div className="w-1 h-2 bg-white rounded-full" />
+          </div>
+        </div>
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white bg-slate-700 px-1.5 py-0.5 rounded whitespace-nowrap pointer-events-none">
+          双击折叠
+        </div>
+      </PanelResizeHandle>
+  );
+}
 
 function explain(nodes: any[], edges: number[][]) {
   if (nodes.length === 0) {
@@ -227,20 +185,19 @@ function PaletteItem({ item }: { item: any }) {
 }
 
 // ===== 组件：网格背景 =====
-function GridBackground() {
+function GridBackground({ zoom, pan }: { zoom: number; pan: { x: number; y: number } }) {
   return (
-      <div className="absolute inset-0 pointer-events-none">
-        <div
-            className="w-full h-full"
-            style={{
-              backgroundImage: `
-            linear-gradient(to right, #e5e7eb 1px, transparent 1px),
-            linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)
-          `,
-              backgroundSize: `${GRID}px ${GRID}px`,
-            }}
-        />
-      </div>
+      <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `
+          linear-gradient(to right, #e5e7eb 1px, transparent 1px),
+          linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)
+        `,
+            backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
+            backgroundPosition: `${pan.x}px ${pan.y}px`,
+          }}
+      />
   );
 }
 
@@ -373,7 +330,13 @@ function ModuleForm({ node, onChange }: { node: any; onChange: (patch: any) => v
 }
 
 // ===== 组件：模块知识展示 =====
-function ModuleKnowledgePanel({ moduleType }: { moduleType: string }) {
+function ModuleKnowledgePanel({
+                                moduleType,
+                                onSectionClick
+                              }: {
+  moduleType: string;
+  onSectionClick: (sectionKey: 'principle' | 'training' | 'demo', sectionTitle: string, content: string) => void;
+}) {
   const knowledge = MODULE_KNOWLEDGE[moduleType];
 
   if (!knowledge) {
@@ -384,59 +347,30 @@ function ModuleKnowledgePanel({ moduleType }: { moduleType: string }) {
     );
   }
 
+  const sections = [
+    { key: 'principle' as const, title: '原理深入', icon: '📐', content: knowledge.principle },
+    { key: 'training' as const, title: '训练策略', icon: '🎯', content: knowledge.training },
+    { key: 'demo' as const, title: '效果演示', icon: '✨', content: knowledge.demo },
+  ].filter(s => s.content);
+
   return (
-      <Accordion type="single" collapsible className="w-full">
-        {knowledge.principle && (
-            <AccordionItem value="principle">
-              <AccordionTrigger className="text-sm">
+      <div className="space-y-2">
+        {sections.map((section) => (
+            <button
+                key={section.key}
+                onClick={() => onSectionClick(section.key, section.title, String(section.content))}
+                className="w-full text-left p-3 rounded-lg border bg-white hover:bg-slate-50 transition-colors group"
+            >
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-base">📐</span>
-                  <span>原理深入</span>
+                  <span className="text-base">{section.icon}</span>
+                  <span className="text-sm font-medium">{section.title}</span>
                 </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="prose prose-sm max-w-none">
-                  <pre className="whitespace-pre-wrap text-xs">{knowledge.principle}</pre>
-                </div>
-                <Button variant="link" size="sm" className="mt-2 p-0 h-auto text-xs">
-                  查看完整文档 →
-                </Button>
-              </AccordionContent>
-            </AccordionItem>
-        )}
-
-        {knowledge.training && (
-            <AccordionItem value="training">
-              <AccordionTrigger className="text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">🎯</span>
-                  <span>训练策略</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="prose prose-sm max-w-none">
-                  <pre className="whitespace-pre-wrap text-xs">{knowledge.training}</pre>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-        )}
-
-        {knowledge.demo && (
-            <AccordionItem value="demo">
-              <AccordionTrigger className="text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">✨</span>
-                  <span>效果演示</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="prose prose-sm max-w-none">
-                  <pre className="whitespace-pre-wrap text-xs">{knowledge.demo}</pre>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-        )}
-      </Accordion>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
+              </div>
+            </button>
+        ))}
+      </div>
   );
 }
 
@@ -469,6 +403,20 @@ export default function Page() {
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [spacePressed, setSpacePressed] = useState(false);
   const [smartImportOpen, setSmartImportOpen] = useState(false);
+  // 详情面板状态
+  const [detailPanelOpen, setDetailPanelOpen] = useState(false);
+  const [detailPanelData, setDetailPanelData] = useState<{
+    moduleType: string;
+    sectionKey: 'principle' | 'training' | 'demo';
+    sectionTitle: string;
+    content: string;
+  } | null>(null);
+// 在主组件中添加 refs
+  const detailPanelRef = useRef<ImperativePanelHandle>(null);
+  const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
+
+// 在主组件中添加状态
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -524,6 +472,17 @@ export default function Page() {
     return id;
   };
   const convId = useMemo(() => (typeof window !== "undefined" ? ensureConversationId() : ""), []);
+
+  // 插入到备注的辅助函数
+  const insertToModelNotes = (t: string) =>
+      setModelMeta((v) => ({ ...v, notes: v.notes ? v.notes + "\n" + t : t }));
+
+  const insertToModuleNotes = (t: string) => {
+    if (!sel) return;
+    setNodes((prev) =>
+        prev.map((n) => (n.id === sel ? { ...n, notes: n.notes ? n.notes + "\n" + t : t } : n))
+    );
+  };
 
   const screenToCanvas = (screenX: number, screenY: number) => {
     const canvas = document.getElementById("canvas-root");
@@ -822,6 +781,23 @@ export default function Page() {
     return () => window.removeEventListener("keydown", onKey);
   }, [fromId, linkMode]);
 
+  useEffect(() => {
+    const canvas = document.getElementById("canvas-root");
+    if (!canvas) return;
+
+    const handleWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      handleZoom(delta, e.clientX, e.clientY);
+    };
+
+    canvas.addEventListener("wheel", handleWheelNative, { passive: false });
+
+    return () => {
+      canvas.removeEventListener("wheel", handleWheelNative);
+    };
+  }, [zoom, pan]); // 注意依赖项
+
   // Self-tests (development only)
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -868,12 +844,12 @@ export default function Page() {
     }
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    const newZoom = Math.min(Math.max(zoom + delta, 0.5), 2);
-    setZoom(newZoom);
-  };
+  // const handleWheel = (e: React.WheelEvent) => {
+  //   e.preventDefault();
+  //   const delta = e.deltaY > 0 ? -0.1 : 0.1;
+  //   const newZoom = Math.min(Math.max(zoom + delta, 0.5), 2);
+  //   setZoom(newZoom);
+  // };
 
   const handlePanMove = (e: React.MouseEvent) => {
     if (isPanning) {
@@ -1069,513 +1045,673 @@ export default function Page() {
             </div>
 
             {/* 主内容区 */}
-            <div className="flex-1 grid grid-cols-[320px_1fr_380px] overflow-hidden">
-              {/* 左侧：模块库 */}
-              <div className="min-h-0 bg-slate-50 overflow-y-auto p-4">
-                {/* Left */}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-5 h-5"/>
-                    <div className="font-semibold">模块库</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-full">
-                      <Search className="absolute left-2 top-2.5 w-4 h-4 text-slate-400"/>
-                      <Input
-                          placeholder="搜索类型 / kind..."
-                          className="pl-8"
-                          value={filter}
-                          onChange={(e) => setFilter(e.target.value)}
-                      />
-                    </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button variant="outline" size="icon" onClick={() => setFilter("")}>
-                          ×
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>清空</TooltipContent>
-                    </Tooltip>
-                  </div>
-                  {/* ===== 新增：智能导入按钮 ===== */}
-                  <div className="rounded-lg border bg-gradient-to-r from-purple-50 to-blue-50 p-3">
-                    <Button
-                        variant="outline"
-                        className="w-full gap-2 bg-white hover:bg-slate-50"
-                        onClick={() => setSmartImportOpen(true)}
-                    >
-                      <Wand2 className="w-4 h-4 text-purple-500"/>
-                      <span>智能导入</span>
-                      <Badge variant="secondary" className="ml-auto text-xs">
-                        AI
-                      </Badge>
-                    </Button>
-                    <p className="text-[11px] text-slate-600 mt-2 text-center">
-                      从 GitHub 或 PDF 自动生成模块
-                    </p>
-                  </div>
-                  {/* ===== 智能导入按钮结束 ===== */}
-                  <div className="grid grid-cols-2 gap-2 max-h-[320px] overflow-auto pr-1">
-                    {filtered.map((it) => (
-                        <PaletteItem key={it.type} item={it}/>
-                    ))}
-                  </div>
-
-                  <ModelLibrary
-                      modelLibrary={MODEL_LIBRARY}
-                      modelLinks={MODEL_LINKS}
-                      onLoadTemplate={loadTemplate}
-                  />
-
-                  <Tabs value={tpl} className="mt-2">
-                    <TabsList className="flex flex-wrap gap-2">
-                      {Object.keys(TEMPLATES).map((k) => (
-                          <TabsTrigger key={k} value={k} onClick={() => loadTemplate(k)} className="text-xs">
-                            {k}
-                          </TabsTrigger>
-                      ))}
-                    </TabsList>
-                  </Tabs>
-                </div>
-              </div>
-
-              {/* Center */}
-              <div className="relative min-h-0 overflow-y-auto p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-5 h-5"/>
-                    <div className="font-semibold">拼装画布</div>
-                    <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc
-                      取消当前源；按空格+鼠标左键拖拽画布；鼠标滚轮缩放
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span>对齐</span>
-                      <Switch checked={snap} onCheckedChange={setSnap}/>
-                    </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                            variant={linkMode ? "default" : "outline"}
-                            size="sm"
-                            className="gap-2"
-                            onClick={() => {
-                              setLinkMode((v) => !v);
-                              setFromId(null);
-                            }}
-                        >
-                          <Link2 className="w-4 h-4"/>
-                          连线
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>连线模式：先点源，再连续点多个目标；Esc 取消源</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button variant="outline" size="sm" className="gap-2" onClick={exportJSON}>
-                          <Download className="w-4 h-4"/>
-                          导出
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>导出当前画布的 JSON（nodes + edges + meta）</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <label
-                            className="inline-flex items-center gap-2 cursor-pointer border rounded-md px-3 py-1.5 bg-white text-sm">
-                          <Upload className="w-4 h-4"/>
-                          导入
-                          <Input type="file" accept="application/json" className="hidden" onChange={importJSON}/>
-                        </label>
-                      </TooltipTrigger>
-                      <TooltipContent>导入先前导出的 JSON，恢复画布</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-
-                <div
-                    id="canvas-root"
-                    className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
-                        linkMode ? "cursor-crosshair" : isPanning ? "cursor-grabbing" : "cursor-grab"
-                    }`}
-                    onWheel={handleWheel}
-                    onMouseDown={handleCanvasMouseDown}
-                    onMouseMove={(e) => {
-                      handlePanMove(e);
-                      const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                      setPointer({x: (e.clientX - r.left - pan.x) / zoom, y: (e.clientY - r.top - pan.y) / zoom});
-                    }}
-                    onMouseUp={handlePanEnd}
-                    onMouseLeave={() => {
-                      handlePanEnd();
-                      setPointer(null);
-                    }}
-                    // onClick={() => setSel(null)}
-                >
-                  {/* 可缩放平移的内容容器 */}
-                  <div
-                      style={{
-                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                        transformOrigin: "0 0",
-                        width: "1500px",
-                        height: "1000px",
-                        position: "relative",
-                        pointerEvents: isPanning ? "none" : "auto", // 平移时禁用内容的鼠标事件
-                      }}
-                      onClick={(e) => {
-                        // 只有点击空白处才取消选择
-                        if (e.target === e.currentTarget) {
-                          setSel(null);
-                        }
-                      }}
-                  >
-                    <GridBackground/>
-
-                    {/* guides */}
-                    {guides.x !== null &&
-                        <div className="absolute top-0 bottom-0 w-px bg-blue-400/60" style={{left: guides.x}}/>}
-                    {guides.y !== null &&
-                        <div className="absolute left-0 right-0 h-px bg-blue-400/60" style={{top: guides.y}}/>}
-
-                    {/* edges */}
-                    <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
-                      {edges.map(([f, t], i) => {
-                        const a = nodes[f],
-                            b = nodes[t];
-                        if (!a || !b) return null;
-                        const x1 = a.x + NODE_W / 2,
-                            y1 = a.y + HDR_H,
-                            x2 = b.x + NODE_W / 2,
-                            y2 = b.y + HDR_H,
-                            mx = (x1 + x2) / 2;
-                        return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
-                                     stroke="#94a3b8"
-                                     strokeWidth="2" fill="none" markerEnd="url(#arrow)"/>;
-                      })}
-                      {linkMode &&
-                          fromId &&
-                          pointer &&
-                          (() => {
-                            const a = nodes.find((n) => n.id === fromId);
-                            if (!a) return null;
-                            const x1 = a.x + NODE_W / 2,
-                                y1 = a.y + HDR_H,
-                                x2 = pointer.x,
-                                y2 = pointer.y,
-                                mx = (x1 + x2) / 2;
-                            return <path d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#60a5fa"
-                                         strokeWidth="2" fill="none" strokeDasharray="6 6"/>;
-                          })()}
-                      <defs>
-                        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6"
-                                orient="auto-start-reverse">
-                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
-                        </marker>
-                      </defs>
-                    </svg>
-
-                    {/* nodes */}
-                    {nodes.map((n) => (
-                        <CanvasNode
-                            key={n.id}
-                            node={n}
-                            color={MODULE_TYPES.find((m) => m.type === n.type)?.color}
-                            selected={sel === n.id}
-                            onSelect={() => setSel(n.id)}
-                            onRemove={() => removeNode(n.id)}
-                            onInfo={() => {
-                            }}
-                            linkMode={linkMode}
-                            isSource={fromId === n.id}
-                            isHot={hover === n.id}
-                            onHoverIn={() => setHover(n.id)}
-                            onHoverOut={() => setHover((prev) => (prev === n.id ? null : prev))}
-                            onClick={() => {
-                              if (linkMode) {
-                                if (!fromId) {
-                                  setFromId(n.id);
-                                } else if (fromId !== n.id) {
-                                  addEdge(fromId, n.id);
-                                } else {
-                                  setFromId(null);
-                                }
-                              } else {
-                                setSel(n.id);
-                              }
-                            }}
-                        />
-                    ))}
-                  </div>
-
-                  {/* 缩放控制面板 - 添加在 canvas-root 内部，缩放容器外部 */}
-                  <div
-                      className="absolute bottom-4 right-4 flex flex-col gap-2 bg-white rounded-lg shadow-md p-2 border z-10">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleZoom(0.1)}
-                            disabled={zoom >= 2}
-                            className="h-8 w-8"
-                        >
-                          <Plus className="w-4 h-4"/>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>放大</TooltipContent>
-                    </Tooltip>
-
-                    <div className="text-xs text-center font-mono text-slate-600 py-1 select-none">
-                      {Math.round(zoom * 100)}%
-                    </div>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleZoom(-0.1)}
-                            disabled={zoom <= 0.5}
-                            className="h-8 w-8"
-                        >
-                          <Minus className="w-4 h-4"/>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>缩小</TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={handleFitToScreen}
-                            className="h-8 w-8"
-                        >
-                          <Maximize2 className="w-4 h-4"/>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>适应画布</TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={handleResetView}
-                            className="h-8 w-8"
-                        >
-                          <RotateCcw className="w-4 h-4"/>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>重置视图</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-              </div>
-
-              {/* 右侧：信息面板 */}
-              <div className="min-h-0 border-l bg-white overflow-y-auto">
-                <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as any)} className="h-full flex flex-col">
-                  <TabsList className="grid grid-cols-3 w-full shrink-0">
-                    <TabsTrigger value="module" className="flex items-center gap-1 text-xs">
-                      <Box className="w-3 h-3"/>
-                      模块
-                    </TabsTrigger>
-                    <TabsTrigger value="model" className="flex items-center gap-1 text-xs">
-                      <Layers className="w-3 h-3"/>
-                      模型
-                    </TabsTrigger>
-                    <TabsTrigger value="tools" className="flex items-center gap-1 text-xs">
-                      <Wand2 className="w-3 h-3"/>
-                      工具
-                    </TabsTrigger>
-                  </TabsList>
-
-                  {/* 模块标签 */}
-                  <TabsContent value="module" className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {selectedNode ? (
-                        <>
-                          {/* 实例级内容 */}
-                          <div className="pb-4 border-b">
-                            <div className="text-xs text-slate-500 mb-1">当前选中</div>
-                            <div className="text-lg font-semibold flex items-center gap-2">
-                              {selectedNode.type}
-                              <Badge variant="outline" className="text-xs">
-                                #{nodes.findIndex((n) => n.id === selectedNode.id) + 1}
-                              </Badge>
-                            </div>
-                          </div>
-
-                          <Accordion type="multiple" defaultValue={["params", "notes"]} className="w-full">
-                            <AccordionItem value="params">
-                              <AccordionTrigger className="text-sm">⚙️ 实例参数</AccordionTrigger>
-                              <AccordionContent>
-                                <ModuleForm
-                                    node={selectedNode}
-                                    onChange={(patch: any) =>
-                                        setNodes((prev) =>
-                                            prev.map((n) => (n.id === sel ? {...n, props: {...n.props, ...patch}} : n))
-                                        )
-                                    }
-                                />
-                              </AccordionContent>
-                            </AccordionItem>
-
-                            <AccordionItem value="notes">
-                              <AccordionTrigger className="text-sm">📝 实例说明</AccordionTrigger>
-                              <AccordionContent>
-                                <Textarea
-                                    value={selectedNode.notes || ""}
-                                    onChange={(e) =>
-                                        setNodes((prev) =>
-                                            prev.map((n) => (n.id === sel ? {...n, notes: e.target.value} : n))
-                                        )
-                                    }
-                                    placeholder="为这个特定的模块实例添加说明..."
-                                    className="min-h-[100px]"
-                                />
-                              </AccordionContent>
-                            </AccordionItem>
-                          </Accordion>
-
-                          {/* 类型级知识 */}
-                          <div className="pt-4 border-t">
-                            <div className="text-xs text-slate-500 mb-3">模块类型知识库（通用）</div>
-                            <ModuleKnowledgePanel moduleType={selectedNode.type}/>
-                          </div>
-                        </>
-                    ) : (
-                        <div className="text-center text-slate-400 py-12">
-                          <Box className="w-12 h-12 mx-auto mb-4 opacity-50"/>
-                          <p className="text-sm">点击画布上的模块以查看详情</p>
+            <div className="flex-1 overflow-hidden">
+              <PanelGroup direction="horizontal" autoSaveId="main-layout">
+                {/* 左侧：模块库 */}
+                <Panel defaultSize={20} minSize={15} maxSize={30} collapsible={true} collapsedSize={3}>
+                  <div className="h-full bg-slate-50 overflow-y-auto p-4">
+                    {/* Left */}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-5 h-5"/>
+                        <div className="font-semibold">模块库</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="relative w-full">
+                          <Search className="absolute left-2 top-2.5 w-4 h-4 text-slate-400"/>
+                          <Input
+                              placeholder="搜索类型 / kind..."
+                              className="pl-8"
+                              value={filter}
+                              onChange={(e) => setFilter(e.target.value)}
+                          />
                         </div>
-                    )}
-                  </TabsContent>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="outline" size="icon" onClick={() => setFilter("")}>
+                              ×
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>清空</TooltipContent>
+                        </Tooltip>
+                      </div>
+                      {/* ===== 新增：智能导入按钮 ===== */}
+                      <div className="rounded-lg border bg-gradient-to-r from-purple-50 to-blue-50 p-3">
+                        <Button
+                            variant="outline"
+                            className="w-full gap-2 bg-white hover:bg-slate-50"
+                            onClick={() => setSmartImportOpen(true)}
+                        >
+                          <Wand2 className="w-4 h-4 text-purple-500"/>
+                          <span>智能导入</span>
+                          <Badge variant="secondary" className="ml-auto text-xs">
+                            AI
+                          </Badge>
+                        </Button>
+                        <p className="text-[11px] text-slate-600 mt-2 text-center">
+                          从 GitHub 或 PDF 自动生成模块
+                        </p>
+                      </div>
+                      {/* ===== 智能导入按钮结束 ===== */}
+                      <div className="grid grid-cols-2 gap-2 max-h-[320px] overflow-auto pr-1">
+                        {filtered.map((it) => (
+                            <PaletteItem key={it.type} item={it}/>
+                        ))}
+                      </div>
 
-                  {/* 模型标签 */}
-                  <TabsContent value="model" className="flex-1 overflow-y-auto p-4">
-                    <Accordion type="multiple" defaultValue={["meta", "stats"]} className="w-full">
-                      <AccordionItem value="meta">
-                        <AccordionTrigger className="text-sm">🏛️ 模型元信息</AccordionTrigger>
-                        <AccordionContent className="space-y-3">
-                          <div>
-                            <label className="text-xs text-slate-500">名称</label>
-                            <Input
-                                value={modelMeta.name}
-                                onChange={(e) => setModelMeta({...modelMeta, name: e.target.value})}
-                                placeholder="模型名称"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-slate-500">作者</label>
-                            <Input
-                                value={modelMeta.author || ""}
-                                onChange={(e) => setModelMeta({...modelMeta, author: e.target.value})}
-                                placeholder="作者"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-slate-500">版本</label>
-                            <Input
-                                value={modelMeta.version || ""}
-                                onChange={(e) => setModelMeta({...modelMeta, version: e.target.value})}
-                                placeholder="版本号"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-slate-500">整体说明</label>
-                            <Textarea
-                                value={modelMeta.notes}
-                                onChange={(e) => setModelMeta({...modelMeta, notes: e.target.value})}
-                                placeholder="模型整体说明..."
-                                className="min-h-[120px]"
-                            />
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
+                      <ModelLibrary
+                          modelLibrary={MODEL_LIBRARY}
+                          modelLinks={MODEL_LINKS}
+                          onLoadTemplate={loadTemplate}
+                      />
 
-                      <AccordionItem value="stats">
-                        <AccordionTrigger className="text-sm">📊 架构统计</AccordionTrigger>
-                        <AccordionContent className="space-y-3">
-                          <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span>模块总数</span>
-                              <Badge>{nodes.length}</Badge>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>连接数</span>
-                              <Badge>{edges.length}</Badge>
-                            </div>
-                          </div>
-
-                          <div className="mt-4">
-                            <div className="text-xs text-slate-500 mb-2">模块分布</div>
-                            <div className="space-y-1">
-                              {Object.entries(moduleDistribution).map(([type, count]) => (
-                                  <div key={type} className="flex justify-between text-xs">
-                                    <span>{type}</span>
-                                    <span className="font-mono">{String(count)}</span>
-                                  </div>
-                              ))}
-                            </div>
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-
-                      <AccordionItem value="validation">
-                        <AccordionTrigger className="text-sm">✅ 架构检查</AccordionTrigger>
-                        <AccordionContent>
-                          <div className="space-y-3">
-                            <div>
-                              <div className="font-medium text-sm mb-1">{ex.headline}</div>
-                              <div className="text-xs text-slate-600">{ex.summary}</div>
-                            </div>
-
-                            {ex.traits.length > 0 && (
-                                <div>
-                                  <div className="text-xs text-slate-500 mb-1">特征</div>
-                                  <div className="flex flex-wrap gap-1">
-                                    {ex.traits.map((t, i) => (
-                                        <Badge key={i} variant="secondary" className="text-xs">
-                                          {t}
-                                        </Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                            )}
-
-                            {ex.warnings.length > 0 && (
-                                <div>
-                                  <div className="text-xs text-slate-500 mb-1">警告</div>
-                                  {ex.warnings.map((w, i) => (
-                                      <div key={i} className="text-xs text-amber-600">
-                                        ⚠️ {w}
-                                      </div>
-                                  ))}
-                                </div>
-                            )}
-
-                            {ex.warnings.length === 0 && nodes.length > 0 && (
-                                <div className="text-xs text-green-600">✓ 架构验证通过</div>
-                            )}
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-                  </TabsContent>
-
-                  {/* 工具标签 */}
-                  <TabsContent value="tools" className="flex-1 overflow-y-auto p-4">
-                    <div className="text-center text-slate-400 py-12">
-                      <Wand2 className="w-12 h-12 mx-auto mb-4 opacity-50"/>
-                      <p className="text-sm">AI Chat 和其他工具即将到来</p>
+                      <Tabs value={tpl} className="mt-2">
+                        <TabsList className="flex flex-wrap gap-2">
+                          {Object.keys(TEMPLATES).map((k) => (
+                              <TabsTrigger key={k} value={k} onClick={() => loadTemplate(k)} className="text-xs">
+                                {k}
+                              </TabsTrigger>
+                          ))}
+                        </TabsList>
+                      </Tabs>
                     </div>
-                  </TabsContent>
-                </Tabs>
-              </div>
+                  </div>
+                </Panel>
+
+                {/* 左侧和其他之间 */}
+                <CollapsibleResizeHandle />
+
+                {/* 第二层：(画布+详情) vs 右侧 */}
+                <Panel defaultSize={80}>
+                  {/* 内层 PanelGroup：画布 + 详情 + 信息栏 */}
+                  <PanelGroup direction="horizontal" autoSaveId="canvas-sidebar-layout">
+                      {/* 第三层：画布 + 详情的组合 */}
+                      <Panel defaultSize={detailPanelOpen ? 70 : 75}>
+                        <PanelGroup
+                            direction="horizontal"
+                            autoSaveId="canvas-detail-layout" // 保存画布+详情布局
+                        >
+                          {/* 画布 */}
+                          <Panel
+                              defaultSize={detailPanelOpen ? 55 : 100}
+                              minSize={40}
+                          >
+                      <div className="relative min-h-0 overflow-y-auto p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Layers className="w-5 h-5"/>
+                            <div className="font-semibold">拼装画布</div>
+                            <div className="text-xs text-slate-500 ml-2">拖拽模块；连线模式：先点“源”，再可连续点多个“目标”；按 Esc
+                              取消当前源；按空格+鼠标左键拖拽画布；鼠标滚轮缩放
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 text-sm">
+                              <span>对齐</span>
+                              <Switch checked={snap} onCheckedChange={setSnap}/>
+                            </div>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                    variant={linkMode ? "default" : "outline"}
+                                    size="sm"
+                                    className="gap-2"
+                                    onClick={() => {
+                                      setLinkMode((v) => !v);
+                                      setFromId(null);
+                                    }}
+                                >
+                                  <Link2 className="w-4 h-4"/>
+                                  连线
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>连线模式：先点源，再连续点多个目标；Esc 取消源</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="outline" size="sm" className="gap-2" onClick={exportJSON}>
+                                  <Download className="w-4 h-4"/>
+                                  导出
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>导出当前画布的 JSON（nodes + edges + meta）</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <label
+                                    className="inline-flex items-center gap-2 cursor-pointer border rounded-md px-3 py-1.5 bg-white text-sm">
+                                  <Upload className="w-4 h-4"/>
+                                  导入
+                                  <Input type="file" accept="application/json" className="hidden" onChange={importJSON}/>
+                                </label>
+                              </TooltipTrigger>
+                              <TooltipContent>导入先前导出的 JSON，恢复画布</TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+
+                        <div
+                            id="canvas-root"
+                            className={`relative h-[calc(100dvh-160px)] min-h-[640px] rounded-2xl bg-white shadow-inner border overflow-hidden ${
+                                linkMode ? "cursor-crosshair" : isPanning ? "cursor-grabbing" : "cursor-grab"
+                            }`}
+                            // onWheel={handleWheel}
+                            onMouseDown={handleCanvasMouseDown}
+                            onMouseMove={(e) => {
+                              handlePanMove(e);
+                              const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                              setPointer({x: (e.clientX - r.left - pan.x) / zoom, y: (e.clientY - r.top - pan.y) / zoom});
+                            }}
+                            onMouseUp={handlePanEnd}
+                            onMouseLeave={() => {
+                              handlePanEnd();
+                              setPointer(null);
+                            }}
+                            // onClick={() => setSel(null)}
+                        >
+
+                          <GridBackground zoom={zoom} pan={pan}/>
+
+                          {/* 可缩放平移的内容容器 */}
+                          <div
+                              style={{
+                                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                                transformOrigin: "0 0",
+                                width: "1500px",
+                                height: "1000px",
+                                position: "relative",
+                                pointerEvents: isPanning ? "none" : "auto", // 平移时禁用内容的鼠标事件
+                              }}
+                              onClick={(e) => {
+                                // 只有点击空白处才取消选择
+                                if (e.target === e.currentTarget) {
+                                  setSel(null);
+                                }
+                              }}
+                          >
+
+                            {/* guides */}
+                            {guides.x !== null &&
+                                <div className="absolute top-0 bottom-0 w-px bg-blue-400/60" style={{left: guides.x}}/>}
+                            {guides.y !== null &&
+                                <div className="absolute left-0 right-0 h-px bg-blue-400/60" style={{top: guides.y}}/>}
+
+                            {/* edges */}
+                            <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
+                              {edges.map(([f, t], i) => {
+                                const a = nodes[f],
+                                    b = nodes[t];
+                                if (!a || !b) return null;
+                                const x1 = a.x + NODE_W / 2,
+                                    y1 = a.y + HDR_H,
+                                    x2 = b.x + NODE_W / 2,
+                                    y2 = b.y + HDR_H,
+                                    mx = (x1 + x2) / 2;
+                                return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
+                                             stroke="#94a3b8"
+                                             strokeWidth="2" fill="none" markerEnd="url(#arrow)"/>;
+                              })}
+                              {linkMode &&
+                                  fromId &&
+                                  pointer &&
+                                  (() => {
+                                    const a = nodes.find((n) => n.id === fromId);
+                                    if (!a) return null;
+                                    const x1 = a.x + NODE_W / 2,
+                                        y1 = a.y + HDR_H,
+                                        x2 = pointer.x,
+                                        y2 = pointer.y,
+                                        mx = (x1 + x2) / 2;
+                                    return <path d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="#60a5fa"
+                                                 strokeWidth="2" fill="none" strokeDasharray="6 6"/>;
+                                  })()}
+                              <defs>
+                                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6"
+                                        orient="auto-start-reverse">
+                                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+                                </marker>
+                              </defs>
+                            </svg>
+
+                            {/* nodes */}
+                            {nodes.map((n) => (
+                                <CanvasNode
+                                    key={n.id}
+                                    node={n}
+                                    color={MODULE_TYPES.find((m) => m.type === n.type)?.color}
+                                    selected={sel === n.id}
+                                    onSelect={() => setSel(n.id)}
+                                    onRemove={() => removeNode(n.id)}
+                                    onInfo={() => {
+                                    }}
+                                    linkMode={linkMode}
+                                    isSource={fromId === n.id}
+                                    isHot={hover === n.id}
+                                    onHoverIn={() => setHover(n.id)}
+                                    onHoverOut={() => setHover((prev) => (prev === n.id ? null : prev))}
+                                    onClick={() => {
+                                      if (linkMode) {
+                                        if (!fromId) {
+                                          setFromId(n.id);
+                                        } else if (fromId !== n.id) {
+                                          addEdge(fromId, n.id);
+                                        } else {
+                                          setFromId(null);
+                                        }
+                                      } else {
+                                        setSel(n.id);
+                                      }
+                                    }}
+                                />
+                            ))}
+                          </div>
+
+                          {/* 缩放控制面板 - 添加在 canvas-root 内部，缩放容器外部 */}
+                          <div
+                              className="absolute bottom-4 right-4 flex flex-col gap-2 bg-white rounded-lg shadow-md p-2 border z-10">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => handleZoom(0.1)}
+                                    disabled={zoom >= 2}
+                                    className="h-8 w-8"
+                                >
+                                  <Plus className="w-4 h-4"/>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>放大</TooltipContent>
+                            </Tooltip>
+
+                            <div className="text-xs text-center font-mono text-slate-600 py-1 select-none">
+                              {Math.round(zoom * 100)}%
+                            </div>
+
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => handleZoom(-0.1)}
+                                    disabled={zoom <= 0.5}
+                                    className="h-8 w-8"
+                                >
+                                  <Minus className="w-4 h-4"/>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>缩小</TooltipContent>
+                            </Tooltip>
+
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={handleFitToScreen}
+                                    className="h-8 w-8"
+                                >
+                                  <Maximize2 className="w-4 h-4"/>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>适应画布</TooltipContent>
+                            </Tooltip>
+
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={handleResetView}
+                                    className="h-8 w-8"
+                                >
+                                  <RotateCcw className="w-4 h-4"/>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>重置视图</TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      </div>
+                    </Panel>
+
+                    {/* 详情面板 - 条件渲染 */}
+                          <CollapsibleResizeHandle
+                              onDoubleClick={() => {
+                                const panel = detailPanelRef.current;
+                                if (panel) {
+                                  if (panel.isCollapsed()) {
+                                    // 如果已折叠，则展开
+                                    panel.expand();
+                                    // setDetailPanelOpen(true);  // ✅ 关键：展开时设置为 true
+                                  } else {
+                                    // 如果未折叠，则折叠
+                                    panel.collapse();
+                                  }
+                                }
+                              }}
+                          />
+                          {/* 详情面板 */}
+                          <Panel
+                              ref={detailPanelRef}
+                              defaultSize={45}
+                              minSize={20}
+                              maxSize={60}
+                              collapsible={true}
+                              collapsedSize={1}         // 完全折叠
+                              onCollapse={() => {
+                                setDetailPanelOpen(false); // 折叠时关闭详情
+                              }}
+                              onExpand={() => {
+                                setDetailPanelOpen(true); // 展开时打开详情
+                              }}
+                              className="animate-in slide-in-from-right duration-300"
+                          >
+                            <div className="h-full border-l bg-white flex flex-col">
+                              {/* 详情面板头部 */}
+                              <div className="flex items-center justify-between p-4 border-b bg-slate-50">
+                                <div className="flex items-center gap-2">
+                                  <BookOpen className="w-4 h-4 text-slate-600" />
+                                  <div>
+                                    <div className="font-medium text-sm">
+                                      {detailPanelData?.moduleType}
+                                    </div>
+                                    <div className="text-xs text-slate-500">
+                                      {detailPanelData?.sectionTitle}
+                                    </div>
+                                  </div>
+                                </div>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => setDetailPanelOpen(false)}
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
+
+                              {/* 详情内容区域 */}
+                              <div className="flex-1 overflow-y-auto p-4">
+                                <div className="prose prose-sm max-w-none">
+                                  <pre className="whitespace-pre-wrap text-xs">
+                                    {detailPanelData?.content}
+                                  </pre>
+                                </div>
+                              </div>
+                            </div>
+                          </Panel>
+
+                        </PanelGroup>
+                      </Panel>
+                    {/* 详情和右侧之间 */}
+                    <CollapsibleResizeHandle/>
+                    {/* 右侧：信息面板 */}
+                    <Panel
+                        ref={sidebarPanelRef}
+                                     defaultSize={detailPanelOpen ? 30 : 25}
+                                     minSize={15}
+                                     maxSize={40}
+                                     collapsible={true}
+                                     collapsedSize={10}
+                                     onCollapse={() => {
+                                       setSidebarCollapsed(true);
+                                       console.log('右侧面板已折叠');
+                                     }}
+                                     onExpand={() => {
+                                       setSidebarCollapsed(false);
+                                       console.log('右侧面板已展开');
+                                     }}>
+                      <div className="h-full border-l bg-white overflow-y-auto">
+                        {/* 折叠时显示展开按钮 */}
+                        {sidebarCollapsed && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
+                              <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => sidebarPanelRef.current?.expand()}
+                                  className="rotate-180"
+                              >
+                                <ChevronLeft className="w-4 h-4" />
+                              </Button>
+                            </div>
+                        )}
+                        {!sidebarCollapsed && (
+                        <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as any)} className="h-full flex flex-col">
+                          <TabsList className="grid grid-cols-3 w-full shrink-0">
+                            <TabsTrigger value="module" className="flex items-center gap-1 text-xs">
+                              <Box className="w-3 h-3"/>
+                              模块
+                            </TabsTrigger>
+                            <TabsTrigger value="model" className="flex items-center gap-1 text-xs">
+                              <Layers className="w-3 h-3"/>
+                              模型
+                            </TabsTrigger>
+                            <TabsTrigger value="tools" className="flex items-center gap-1 text-xs">
+                              <Wand2 className="w-3 h-3"/>
+                              工具
+                            </TabsTrigger>
+                          </TabsList>
+
+                          {/* 模块标签 */}
+                          <TabsContent value="module" className="flex-1 overflow-y-auto p-4 space-y-4">
+                            {selectedNode ? (
+                                <>
+                                  {/* 实例级内容 */}
+                                  <div className="pb-4 border-b">
+                                    <div className="text-xs text-slate-500 mb-1">当前选中</div>
+                                    <div className="text-lg font-semibold flex items-center gap-2">
+                                      {selectedNode.type}
+                                      <Badge variant="outline" className="text-xs">
+                                        #{nodes.findIndex((n) => n.id === selectedNode.id) + 1}
+                                      </Badge>
+                                    </div>
+                                  </div>
+
+                                  <Accordion type="multiple" defaultValue={["params", "notes"]} className="w-full">
+                                    <AccordionItem value="params">
+                                      <AccordionTrigger className="text-sm">⚙️ 实例参数</AccordionTrigger>
+                                      <AccordionContent>
+                                        <ModuleForm
+                                            node={selectedNode}
+                                            onChange={(patch: any) =>
+                                                setNodes((prev) =>
+                                                    prev.map((n) => (n.id === sel ? {...n, props: {...n.props, ...patch}} : n))
+                                                )
+                                            }
+                                        />
+                                      </AccordionContent>
+                                    </AccordionItem>
+
+                                    <AccordionItem value="notes">
+                                      <AccordionTrigger className="text-sm">📝 实例说明</AccordionTrigger>
+                                      <AccordionContent>
+                                        <Textarea
+                                            value={selectedNode.notes || ""}
+                                            onChange={(e) =>
+                                                setNodes((prev) =>
+                                                    prev.map((n) => (n.id === sel ? {...n, notes: e.target.value} : n))
+                                                )
+                                            }
+                                            placeholder="为这个特定的模块实例添加说明..."
+                                            className="min-h-[100px]"
+                                        />
+                                      </AccordionContent>
+                                    </AccordionItem>
+                                  </Accordion>
+
+                                  {/* 类型级知识 */}
+                                  <div className="pt-4 border-t">
+                                    <div className="text-xs text-slate-500 mb-3">模块类型知识库（通用）</div>
+                                    <ModuleKnowledgePanel
+                                        moduleType={selectedNode.type}
+                                        onSectionClick={(sectionKey, sectionTitle, content) => {
+                                          setDetailPanelData({
+                                            moduleType: selectedNode.type,
+                                            sectionKey,
+                                            sectionTitle,
+                                            content
+                                          });
+                                          const panel = detailPanelRef.current;
+                                          if (panel) {
+                                            if (panel.isCollapsed()) {
+                                              // 如果已折叠，则展开
+                                              panel.expand();
+                                              // setDetailPanelOpen(true);  // ✅ 关键：展开时设置为 true
+                                            } else {
+                                              // 如果未折叠，则折叠
+                                              panel.collapse();
+                                            }
+                                          }
+                                        }}
+                                    />
+                                  </div>
+                                </>
+                            ) : (
+                                <div className="text-center text-slate-400 py-12">
+                                  <Box className="w-12 h-12 mx-auto mb-4 opacity-50"/>
+                                  <p className="text-sm">点击画布上的模块以查看详情</p>
+                                </div>
+                            )}
+                          </TabsContent>
+
+                          {/* 模型标签 */}
+                          <TabsContent value="model" className="flex-1 overflow-y-auto p-4">
+                            <Accordion type="multiple" defaultValue={["meta", "stats"]} className="w-full">
+                              <AccordionItem value="meta">
+                                <AccordionTrigger className="text-sm">🏛️ 模型元信息</AccordionTrigger>
+                                <AccordionContent className="space-y-3">
+                                  <div>
+                                    <label className="text-xs text-slate-500">名称</label>
+                                    <Input
+                                        value={modelMeta.name}
+                                        onChange={(e) => setModelMeta({...modelMeta, name: e.target.value})}
+                                        placeholder="模型名称"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs text-slate-500">作者</label>
+                                    <Input
+                                        value={modelMeta.author || ""}
+                                        onChange={(e) => setModelMeta({...modelMeta, author: e.target.value})}
+                                        placeholder="作者"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs text-slate-500">版本</label>
+                                    <Input
+                                        value={modelMeta.version || ""}
+                                        onChange={(e) => setModelMeta({...modelMeta, version: e.target.value})}
+                                        placeholder="版本号"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs text-slate-500">整体说明</label>
+                                    <Textarea
+                                        value={modelMeta.notes}
+                                        onChange={(e) => setModelMeta({...modelMeta, notes: e.target.value})}
+                                        placeholder="模型整体说明..."
+                                        className="min-h-[120px]"
+                                    />
+                                  </div>
+                                </AccordionContent>
+                              </AccordionItem>
+
+                              <AccordionItem value="stats">
+                                <AccordionTrigger className="text-sm">📊 架构统计</AccordionTrigger>
+                                <AccordionContent className="space-y-3">
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span>模块总数</span>
+                                      <Badge>{nodes.length}</Badge>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>连接数</span>
+                                      <Badge>{edges.length}</Badge>
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-4">
+                                    <div className="text-xs text-slate-500 mb-2">模块分布</div>
+                                    <div className="space-y-1">
+                                      {Object.entries(moduleDistribution).map(([type, count]) => (
+                                          <div key={type} className="flex justify-between text-xs">
+                                            <span>{type}</span>
+                                            <span className="font-mono">{String(count)}</span>
+                                          </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </AccordionContent>
+                              </AccordionItem>
+
+                              <AccordionItem value="validation">
+                                <AccordionTrigger className="text-sm">✅ 架构检查</AccordionTrigger>
+                                <AccordionContent>
+                                  <div className="space-y-3">
+                                    <div>
+                                      <div className="font-medium text-sm mb-1">{ex.headline}</div>
+                                      <div className="text-xs text-slate-600">{ex.summary}</div>
+                                    </div>
+
+                                    {ex.traits.length > 0 && (
+                                        <div>
+                                          <div className="text-xs text-slate-500 mb-1">特征</div>
+                                          <div className="flex flex-wrap gap-1">
+                                            {ex.traits.map((t, i) => (
+                                                <Badge key={i} variant="secondary" className="text-xs">
+                                                  {t}
+                                                </Badge>
+                                            ))}
+                                          </div>
+                                        </div>
+                                    )}
+
+                                    {ex.warnings.length > 0 && (
+                                        <div>
+                                          <div className="text-xs text-slate-500 mb-1">警告</div>
+                                          {ex.warnings.map((w, i) => (
+                                              <div key={i} className="text-xs text-amber-600">
+                                                ⚠️ {w}
+                                              </div>
+                                          ))}
+                                        </div>
+                                    )}
+
+                                    {ex.warnings.length === 0 && nodes.length > 0 && (
+                                        <div className="text-xs text-green-600">✓ 架构验证通过</div>
+                                    )}
+                                  </div>
+                                </AccordionContent>
+                              </AccordionItem>
+                            </Accordion>
+                          </TabsContent>
+
+                          {/* 工具标签 */}
+                          <TabsContent value="tools" className="flex-1 overflow-y-auto p-4 space-y-4">
+                            <ChatPanel
+                                conversationId={convId}
+                                canInsertModule={!!sel}
+                                onInsertModel={insertToModelNotes}
+                                onInsertModule={insertToModuleNotes}
+                                selectedNodeType={selectedNode?.type || null}
+                                modelMeta={modelMeta}
+                                nodes={nodes}
+                                edges={edges}
+                            />
+
+                            {/* 未来可以添加更多工具 */}
+                            {/* <ArchitectureValidator nodes={nodes} edges={edges} /> */}
+                            {/* <ParameterCalculator nodes={nodes} /> */}
+                            {/* <ExportTools modelMeta={modelMeta} nodes={nodes} edges={edges} /> */}
+                          </TabsContent>
+                        </Tabs>
+                            )}
+                      </div>
+                    </Panel>
+                  </PanelGroup>
+                </Panel>
+              </PanelGroup>
             </div>
           </div>
 
